@@ -41,6 +41,7 @@ ENV_FILES = (PROJECT_ROOT / ".env.local", PROJECT_ROOT / ".env")
 REQUEST_LOGS: dict[str, list[float]] = {}
 RESPONSE_CACHE: dict[str, tuple[float, Any]] = {}
 SERVER_LOCK = threading.Lock()
+CORP_CACHE_LOCK = threading.Lock()
 CORP_CLASS_LABELS = {
     "Y": "코스피(유가증권시장)",
     "K": "코스닥",
@@ -216,31 +217,35 @@ def load_corp_codes(config: AppConfig, *, refresh: bool = False) -> list[dict[st
     if CORP_CACHE.is_file() and not refresh:
         return json.loads(CORP_CACHE.read_text(encoding="utf-8"))
 
-    api_key = require_key(config)
-    url = f"{BASE_URL}/corpCode.xml?{urllib.parse.urlencode({'crtfc_key': api_key})}"
-    with urllib.request.urlopen(url, timeout=30) as response:
-        content = response.read()
+    with CORP_CACHE_LOCK:
+        if CORP_CACHE.is_file() and not refresh:
+            return json.loads(CORP_CACHE.read_text(encoding="utf-8"))
 
-    with zipfile.ZipFile(BytesIO(content)) as archive:
-        names = archive.namelist()
-        if not names:
-            raise RuntimeError("OpenDART corpCode response had no files.")
-        xml_bytes = archive.read(names[0])
+        api_key = require_key(config)
+        url = f"{BASE_URL}/corpCode.xml?{urllib.parse.urlencode({'crtfc_key': api_key})}"
+        with urllib.request.urlopen(url, timeout=30) as response:
+            content = response.read()
 
-    root = ElementTree.fromstring(xml_bytes)
-    companies = []
-    for node in root.findall("list"):
-        companies.append(
-            {
-                "corp_code": text_of(node, "corp_code"),
-                "corp_name": text_of(node, "corp_name"),
-                "stock_code": text_of(node, "stock_code"),
-                "modify_date": text_of(node, "modify_date"),
-            }
-        )
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    CORP_CACHE.write_text(json.dumps(companies, ensure_ascii=False), encoding="utf-8")
-    return companies
+        with zipfile.ZipFile(BytesIO(content)) as archive:
+            names = archive.namelist()
+            if not names:
+                raise RuntimeError("OpenDART corpCode response had no files.")
+            xml_bytes = archive.read(names[0])
+
+        root = ElementTree.fromstring(xml_bytes)
+        companies = []
+        for node in root.findall("list"):
+            companies.append(
+                {
+                    "corp_code": text_of(node, "corp_code"),
+                    "corp_name": text_of(node, "corp_name"),
+                    "stock_code": text_of(node, "stock_code"),
+                    "modify_date": text_of(node, "modify_date"),
+                }
+            )
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        CORP_CACHE.write_text(json.dumps(companies, ensure_ascii=False), encoding="utf-8")
+        return companies
 
 
 def text_of(node: ElementTree.Element, tag: str) -> str:
@@ -282,9 +287,6 @@ def resolve_company(company: str, config: AppConfig, corp_code: str | None = Non
     if config.demo:
         return load_demo_companies()[0]
     if corp_code:
-        matches = [item for item in load_corp_codes(config) if item.get("corp_code") == corp_code]
-        if matches:
-            return matches[0]
         return {"corp_code": corp_code, "corp_name": company, "stock_code": "", "modify_date": ""}
     matches = search_companies(company, config, limit=5)
     if not matches:
