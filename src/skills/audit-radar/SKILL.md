@@ -9,7 +9,7 @@ Use this skill to produce a focused audit-market research memo for SamilPwC-styl
 
 The core question is narrow:
 
-> Which auditor is matched to this company, how long has that auditor served, and what audit appointment or periodic designation event may be coming next?
+> Is this company a good SamilPwC audit-sales target, why, and what appointment or periodic designation event creates the opening?
 
 Also classify the company into a sales-research case when possible:
 
@@ -19,6 +19,12 @@ Also classify the company into a sales-research case when possible:
 - financial company candidate
 - limited company candidate
 - external-audit threshold candidate requiring financial-statement checks
+
+Use the SamilPwC persona by default:
+
+- audit-led relationship building
+- expansion into Tax, Deals, internal control, industry, and global network work where independence permits
+- preference for companies with near-term auditor-change timing, strong disclosure/regulatory needs, or verifiable external-audit filings
 
 ## Data Sources
 
@@ -39,6 +45,7 @@ From the plugin root:
 ```bash
 python3 scripts/audit_radar.py search 삼성전자
 python3 scripts/audit_radar.py report 삼성전자 --years 10 --output audit-radar-report.md
+python3 scripts/audit_radar.py recommend 삼성전자 --years 10
 python3 scripts/audit_radar.py serve --port 8765
 ```
 
@@ -67,6 +74,7 @@ Lower-confidence statements:
 - Whether assets, revenue, liabilities, employees, or member-count thresholds are satisfied.
 - Exact FSS notification timing for a specific company.
 - Whether a missing public filing is a legal non-submission, delayed submission, non-subject year, or naming/API mismatch.
+- Whether a persona-based recommendation would pass independence, conflict, quality-control, or internal acceptance review.
 
 ## Output Style
 
@@ -74,6 +82,8 @@ For Korean users, answer in Korean.
 
 Lead with:
 
+- SamilPwC recommendation grade and fit score
+- target type and first outreach angle
 - current auditor
 - consecutive tenure
 - estimated next event

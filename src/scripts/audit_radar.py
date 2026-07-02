@@ -30,6 +30,7 @@ REPORT_CODE_ANNUAL = "11011"
 DEFAULT_YEARS = 10
 MIN_YEARS = 4
 MAX_YEARS = 12
+MAX_RECOMMENDATIONS = 3
 RATE_LIMIT_WINDOW_SECONDS = 60
 RATE_LIMIT_MAX_REQUESTS = 30
 RESPONSE_CACHE_TTL_SECONDS = 60 * 60
@@ -83,6 +84,32 @@ FINANCIAL_NAME_KEYWORDS = (
     "생명보험",
 )
 LIMITED_COMPANY_KEYWORDS = ("유한회사", "유한책임회사", "(유)", "（유）")
+DEFAULT_FIRM_PERSONA = "samil_pwc"
+FIRM_PERSONAS = {
+    "samil_pwc": {
+        "code": "samil_pwc",
+        "label": "삼일PwC",
+        "positioning": "감사 기반 신뢰관계에서 Tax, Deals, 산업·글로벌 네트워크 자문으로 확장하는 회계법인",
+        "strengths": [
+            "외부감사 및 내부회계관리제도 감사",
+            "국내외 세무 리스크와 조세 기회 검토",
+            "M&A, 실사, 가치평가, 구조조정 등 Deals 자문",
+            "PwC 글로벌 네트워크와 산업별 전문 조직",
+        ],
+        "preferred_leads": [
+            "감사인 교체 또는 자유선임 전환 타이밍이 가까운 회사",
+            "상장사, 대형비상장, 금융회사, 사업보고서 제출대상처럼 공시·통제 요구가 큰 회사",
+            "외부감사 최초 진입, 미제출·정정 등 회계 컴플라이언스 이슈가 보이는 회사",
+            "세무·딜·글로벌 확장 자문으로 연결될 수 있는 감사 관계 후보",
+        ],
+        "public_basis": [
+            "삼일PwC 재무제표 감사 서비스",
+            "삼일PwC Tax Services",
+            "삼일PwC Deals",
+            "삼일PwC 산업센터 및 PwC 글로벌 네트워크",
+        ],
+    }
+}
 
 
 @dataclass
@@ -108,6 +135,13 @@ def main() -> int:
     report.add_argument("--output")
     report.add_argument("--format", choices=("markdown", "json"), default="markdown")
     report.add_argument("--demo", action="store_true")
+
+    recommend = sub.add_parser("recommend", help="Rank audit sales targets for a firm persona")
+    recommend.add_argument("query", help="Company keyword, stock code, or corp_code")
+    recommend.add_argument("--years", type=int, default=DEFAULT_YEARS)
+    recommend.add_argument("--limit", type=int, default=MAX_RECOMMENDATIONS)
+    recommend.add_argument("--format", choices=("markdown", "json"), default="markdown")
+    recommend.add_argument("--demo", action="store_true")
 
     serve = sub.add_parser("serve", help="Run the local web service")
     serve.add_argument("--host", default=os.environ.get("HOST", "127.0.0.1"))
@@ -140,6 +174,15 @@ def main() -> int:
             Path(args.output).write_text(rendered + "\n", encoding="utf-8")
         else:
             print(rendered)
+        return 0
+    if args.command == "recommend":
+        payload = build_recommendations(
+            args.query,
+            config,
+            years=clamp_years(args.years),
+            limit=args.limit,
+        )
+        print(render_recommendations(payload, args.format))
         return 0
     if args.command == "serve":
         run_server(args.host, args.port, config)
@@ -371,10 +414,23 @@ def build_report(
         disclosure_bundle["special_issues"],
         company_profile,
     )
+    firm_persona = get_firm_persona(DEFAULT_FIRM_PERSONA)
+    lead_recommendation = build_lead_recommendation(
+        firm_persona,
+        corp,
+        analysis,
+        sales_strategy,
+        coverage,
+        disclosure_bundle["special_issues"],
+        service_history,
+        company_profile,
+    )
     analysis["sales_strategy"] = sales_strategy
+    analysis["lead_recommendation"] = lead_recommendation
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "source": "OpenDART public API (periodic reports + external-audit disclosures)",
+        "firm_persona": firm_persona,
         "company": corp,
         "company_profile": company_profile,
         "history": audit_history,
@@ -388,8 +444,10 @@ def build_report(
         "service_contracts": service_history,
         "analysis": analysis,
         "sales_strategy": sales_strategy,
+        "lead_recommendation": lead_recommendation,
         "disclaimers": [
             "Public DART data does not directly label free appointment, periodic designation, split designation, deferral, or all private-company eligibility facts.",
+            "Recommendations are persona-based sales research signals, not audit acceptance, independence, conflict, or quality-control decisions.",
             "Sales case segmentation uses public filing signals only; large private-company, financial-company, limited-company, and external-audit threshold status must be confirmed against source documents.",
             "External-audit disclosure rows use DART filing-list metadata and should be checked against the original audit report when used for outreach or acceptance decisions.",
             "Missing-year notes mean the plugin did not find a matching public filing in the searched window; they are not proof of legal non-submission.",
@@ -1260,6 +1318,375 @@ def priority_label(priority: str) -> str:
     }.get(priority, "우선순위 확인")
 
 
+def get_firm_persona(code: str = DEFAULT_FIRM_PERSONA) -> dict[str, Any]:
+    return dict(FIRM_PERSONAS.get(code, FIRM_PERSONAS[DEFAULT_FIRM_PERSONA]))
+
+
+def build_lead_recommendation(
+    persona: dict[str, Any],
+    corp: dict[str, str],
+    analysis: dict[str, Any],
+    sales_strategy: dict[str, Any],
+    coverage: dict[str, Any],
+    special_issues: list[dict[str, Any]],
+    service_contracts: list[dict[str, Any]],
+    company_profile: dict[str, Any],
+) -> dict[str, Any]:
+    segment = sales_strategy.get("company_segment", {})
+    sales_case = sales_strategy.get("sales_case", {})
+    flags = sales_strategy.get("flags", [])
+    event = analysis.get("estimated_event", {}) or {}
+    current_auditor_key = analysis.get("current_auditor_key") or ""
+    is_current_samil = current_auditor_key == "삼일"
+
+    drivers = []
+    timing_points, timing_evidence = lead_timing_points(sales_case, event)
+    drivers.append({"label": "타이밍", "points": timing_points, "evidence": timing_evidence})
+
+    segment_points, segment_evidence = lead_segment_points(segment, flags)
+    drivers.append({"label": "삼일 적합도", "points": segment_points, "evidence": segment_evidence})
+
+    coverage_points, coverage_evidence = lead_coverage_points(coverage, special_issues)
+    drivers.append({"label": "공개 검증성", "points": coverage_points, "evidence": coverage_evidence})
+
+    expansion_points, expansion_evidence = lead_expansion_points(segment, flags, service_contracts, company_profile)
+    drivers.append({"label": "부가자문 확장성", "points": expansion_points, "evidence": expansion_evidence})
+
+    friction_points, friction_evidence = lead_friction_points(is_current_samil, special_issues, sales_case)
+    drivers.append({"label": "제약 조정", "points": friction_points, "evidence": friction_evidence})
+
+    raw_score = sum(item["points"] for item in drivers)
+    fit_score = max(0, min(100, raw_score))
+    grade = recommendation_grade(fit_score)
+    target_type = "관계 유지·부가자문 리드" if is_current_samil else "신규 감사영업 후보"
+    verdict = recommendation_verdict(fit_score, target_type, sales_case)
+    opening_angle = build_opening_angle(persona, sales_case, segment, flags, is_current_samil)
+
+    return {
+        "firm": {
+            "code": persona.get("code", ""),
+            "label": persona.get("label", ""),
+            "positioning": persona.get("positioning", ""),
+        },
+        "target_type": target_type,
+        "fit_score": fit_score,
+        "grade": grade,
+        "verdict": verdict,
+        "opening_angle": opening_angle,
+        "suggested_services": suggested_services_for_persona(persona, sales_case, segment, flags),
+        "score_drivers": drivers,
+        "next_steps": build_recommendation_next_steps(sales_case, segment, flags, special_issues, is_current_samil),
+        "caveats": build_recommendation_caveats(is_current_samil, special_issues),
+        "persona_basis": persona.get("public_basis", []),
+    }
+
+
+def lead_timing_points(sales_case: dict[str, Any], event: dict[str, Any]) -> tuple[int, str]:
+    code = sales_case.get("code", "")
+    priority = sales_case.get("priority", "")
+    if code == "designation_exit_opportunity":
+        points = 34 if event.get("years_remaining") == 0 else 28
+    elif code in {"periodic_designation_watch", "three_year_renewal_cycle"}:
+        points = 26 if priority == "high" else 22
+    elif code == "annual_appointment_window":
+        points = 22
+    elif code == "compliance_risk_watch":
+        points = 20
+    elif code in {"listed_monitoring", "audit_threshold_candidate_research"}:
+        points = 12
+    else:
+        points = 8
+    return points, sales_case.get("timing") or sales_case.get("label") or "선임/지정 이벤트 타이밍 확인 필요"
+
+
+def lead_segment_points(segment: dict[str, Any], flags: list[dict[str, Any]]) -> tuple[int, str]:
+    code = segment.get("code", "")
+    points_by_segment = {
+        "listed": 18,
+        "large_private_or_business_report_filer_candidate": 21,
+        "private_audit_subject": 17,
+        "private_audit_subject_candidate": 14,
+        "audit_threshold_candidate": 9,
+    }
+    points = points_by_segment.get(code, 8)
+    flag_codes = {flag.get("code") for flag in flags}
+    if "financial_candidate" in flag_codes:
+        points += 5
+    if "limited_company_candidate" in flag_codes:
+        points += 3
+    evidence = segment.get("label", "세그먼트 확인 필요")
+    if flags:
+        evidence += " · " + " · ".join(flag.get("label", "") for flag in flags)
+    return min(points, 26), evidence
+
+
+def lead_coverage_points(
+    coverage: dict[str, Any],
+    special_issues: list[dict[str, Any]],
+) -> tuple[int, str]:
+    rows = int_or_zero(coverage.get("merged_rows"))
+    periodic_rows = int_or_zero(coverage.get("periodic_report_api_rows"))
+    external_rows = int_or_zero(coverage.get("external_audit_report_rows"))
+    points = 8
+    if periodic_rows:
+        points += 7
+    if external_rows:
+        points += 4
+    if rows >= 6:
+        points += 4
+    if special_issues:
+        points += 3
+    if coverage.get("missing_recent_years"):
+        points -= 4
+    evidence = f"감사 이력 {rows}건, 정기보고서 API {periodic_rows}건, 외부감사 공시 {external_rows}건"
+    if special_issues:
+        evidence += f", 특이공시 {len(special_issues)}건"
+    return max(0, min(points, 22)), evidence
+
+
+def lead_expansion_points(
+    segment: dict[str, Any],
+    flags: list[dict[str, Any]],
+    service_contracts: list[dict[str, Any]],
+    company_profile: dict[str, Any],
+) -> tuple[int, str]:
+    points = 8
+    reasons = []
+    segment_code = segment.get("code", "")
+    if segment_code in {"listed", "large_private_or_business_report_filer_candidate"}:
+        points += 5
+        reasons.append("공시·내부통제·세무 이슈 확장 가능")
+    flag_codes = {flag.get("code") for flag in flags}
+    if "financial_candidate" in flag_codes:
+        points += 4
+        reasons.append("금융회사 규제·내부통제 자문 연결 가능")
+    if "limited_company_candidate" in flag_codes:
+        points += 2
+        reasons.append("유한회사 외감요건·지배구조 확인 수요")
+    if service_contracts:
+        points += 2
+        reasons.append("감사용역 보수·시간 데이터 확인 가능")
+    if str(company_profile.get("hm_url", "")).strip():
+        points += 1
+        reasons.append("회사 프로필 보조 정보 존재")
+    return min(points, 18), " · ".join(reasons) or "감사 리드 중심, 부가자문 확장성 추가 확인 필요"
+
+
+def lead_friction_points(
+    is_current_samil: bool,
+    special_issues: list[dict[str, Any]],
+    sales_case: dict[str, Any],
+) -> tuple[int, str]:
+    points = 0
+    reasons = []
+    if is_current_samil:
+        points -= 18
+        reasons.append("현재 감사인이 삼일로 보여 신규 감사 수임 리드는 아님")
+    if special_issues:
+        points -= 4
+        reasons.append("특이공시 원문 확인 전 컨택 리스크 존재")
+    if sales_case.get("code") == "source_gap_research":
+        points -= 6
+        reasons.append("공개 감사인 이력 부족")
+    return points, " · ".join(reasons) or "중대한 감점 신호 없음"
+
+
+def recommendation_grade(score: int) -> str:
+    if score >= 75:
+        return "A"
+    if score >= 60:
+        return "B"
+    if score >= 45:
+        return "C"
+    return "Watch"
+
+
+def recommendation_verdict(
+    score: int,
+    target_type: str,
+    sales_case: dict[str, Any],
+) -> str:
+    if score >= 75:
+        return f"{target_type}: 우선 검토"
+    if score >= 60:
+        return f"{target_type}: 후보군 편입"
+    if score >= 45:
+        return f"{target_type}: 모니터링"
+    return f"{target_type}: 데이터 보강 후 재평가"
+
+
+def build_opening_angle(
+    persona: dict[str, Any],
+    sales_case: dict[str, Any],
+    segment: dict[str, Any],
+    flags: list[dict[str, Any]],
+    is_current_samil: bool,
+) -> str:
+    if is_current_samil:
+        return "기존 감사 관계를 전제로 독립성 허용 범위 내 세무·딜·내부통제 후속 니즈를 확인"
+    case_code = sales_case.get("code", "")
+    if case_code == "designation_exit_opportunity":
+        return "지정감사 종료 후 자유선임 전환 가능 시점을 근거로 사전 관계 형성"
+    if case_code == "periodic_designation_watch":
+        return "주기적 지정·유예·분산지정 판단을 돕는 제도 점검 미팅 제안"
+    if case_code == "three_year_renewal_cycle":
+        return "3년 선임 사이클과 대형비상장/사업보고서 제출대상 여부 점검"
+    if case_code == "annual_appointment_window":
+        return "일반 비상장 외감대상 선임기한과 최초 외감 온보딩 이슈로 접근"
+    flag_codes = {flag.get("code") for flag in flags}
+    if "financial_candidate" in flag_codes:
+        return "금융회사 규제·내부통제·감사위원회 맥락에서 감사 품질과 전환 가능성 점검"
+    if segment.get("code") == "audit_threshold_candidate":
+        return "외감요건 충족 가능성 진단을 시작점으로 감사·세무 기초 리드 발굴"
+    return f"{persona.get('label', '회계법인')}의 감사·세무·딜 네트워크 적합성 검토"
+
+
+def suggested_services_for_persona(
+    persona: dict[str, Any],
+    sales_case: dict[str, Any],
+    segment: dict[str, Any],
+    flags: list[dict[str, Any]],
+) -> list[str]:
+    services = ["외부감사 선임/전환 리서치", "내부회계관리제도 및 감사위원회 커뮤니케이션 점검"]
+    case_code = sales_case.get("code", "")
+    if case_code in {"designation_exit_opportunity", "periodic_designation_watch"}:
+        services.append("주기적 지정·자유선임 전환 사전 진단")
+    if segment.get("code") in {"large_private_or_business_report_filer_candidate", "private_audit_subject"}:
+        services.append("외감대상 요건 및 선임보고 일정 점검")
+    flag_codes = {flag.get("code") for flag in flags}
+    if "financial_candidate" in flag_codes:
+        services.append("금융규제·리스크관리·내부통제 자문")
+    if "limited_company_candidate" in flag_codes:
+        services.append("유한회사 외감요건 및 지배구조 점검")
+    services.append("세무 리스크 및 Deals 기회 사전 스크리닝")
+    return services[:5]
+
+
+def build_recommendation_next_steps(
+    sales_case: dict[str, Any],
+    segment: dict[str, Any],
+    flags: list[dict[str, Any]],
+    special_issues: list[dict[str, Any]],
+    is_current_samil: bool,
+) -> list[str]:
+    steps = []
+    if is_current_samil:
+        steps.append("현재 삼일 감사 관계 여부와 독립성 제한 범위를 내부 시스템에서 확인")
+    else:
+        steps.append("현 감사인 선임 사유가 자유선임인지 지정인지 원문 공시로 확인")
+    steps.append(sales_case.get("next_action", "감사인 선임보고 및 원문 공시 확인"))
+    if segment.get("code") in {"large_private_or_business_report_filer_candidate", "audit_threshold_candidate"}:
+        steps.append("자산·매출·부채·종업원 수와 사업보고서 제출대상 여부 확인")
+    if special_issues:
+        steps.append("미제출·지연·정정 공시 원문에서 사유와 후속 제출 여부 확인")
+    if flags:
+        steps.append("금융회사·유한회사 등 보조 플래그의 법적 요건을 별도 확인")
+    return steps[:5]
+
+
+def build_recommendation_caveats(
+    is_current_samil: bool,
+    special_issues: list[dict[str, Any]],
+) -> list[str]:
+    caveats = [
+        "추천 점수는 공개 공시와 삼일PwC 페르소나 기반의 영업 리서치 신호입니다.",
+        "감사 수임 가능성은 독립성, 이해상충, 품질관리, 내부 승인 절차를 통과해야 판단할 수 있습니다.",
+    ]
+    if is_current_samil:
+        caveats.append("현재 감사인이 삼일이면 신규 감사영업이 아니라 유지·부가자문 관점으로 해석해야 합니다.")
+    if special_issues:
+        caveats.append("특이공시가 있는 회사는 컨택 전 원문과 후속 정정 여부를 먼저 확인해야 합니다.")
+    return caveats
+
+
+def build_recommendations(
+    query: str,
+    config: AppConfig,
+    *,
+    years: int = DEFAULT_YEARS,
+    limit: int = MAX_RECOMMENDATIONS,
+) -> dict[str, Any]:
+    limit = max(1, min(MAX_RECOMMENDATIONS, limit))
+    if config.demo:
+        report = build_demo_report()
+        return {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "query": query,
+            "firm_persona": report["firm_persona"],
+            "recommendations": [recommendation_summary(report)],
+            "errors": [],
+            "notes": ["Demo data only."],
+        }
+
+    candidates = search_companies(query, config, limit=max(limit, 5))
+    recommendations = []
+    errors = []
+    for company in candidates[:limit]:
+        try:
+            report = build_report(
+                company.get("corp_name", query),
+                config,
+                years=years,
+                corp_code=company.get("corp_code", ""),
+            )
+            recommendations.append(recommendation_summary(report))
+        except Exception as exc:  # noqa: BLE001
+            errors.append(
+                {
+                    "corp_name": company.get("corp_name", ""),
+                    "corp_code": company.get("corp_code", ""),
+                    "error": str(exc),
+                }
+            )
+
+    recommendations.sort(
+        key=lambda item: (
+            -int_or_zero(item.get("fit_score")),
+            str(item.get("company", {}).get("corp_name", "")),
+        )
+    )
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "query": query,
+        "firm_persona": get_firm_persona(DEFAULT_FIRM_PERSONA),
+        "recommendations": recommendations,
+        "errors": errors,
+        "notes": [
+            "추천은 검색 후보 중 상위 일부를 공개 공시로 재조회해 산정합니다.",
+            "무료 배포 환경에서는 응답 시간이 길 수 있어 한 번에 최대 3개 후보만 평가합니다.",
+        ],
+    }
+
+
+def recommendation_summary(report: dict[str, Any]) -> dict[str, Any]:
+    company = report.get("company", {})
+    analysis = report.get("analysis", {})
+    strategy = report.get("sales_strategy", {})
+    recommendation = report.get("lead_recommendation", {})
+    sales_case = strategy.get("sales_case", {})
+    segment = strategy.get("company_segment", {})
+    return {
+        "company": {
+            "corp_name": company.get("corp_name", ""),
+            "corp_code": company.get("corp_code", ""),
+            "stock_code": company.get("stock_code", ""),
+        },
+        "current_auditor": analysis.get("current_auditor"),
+        "latest_business_year": analysis.get("latest_business_year"),
+        "consecutive_years": analysis.get("consecutive_years"),
+        "segment": segment.get("label", ""),
+        "sales_case": sales_case.get("label", ""),
+        "fit_score": recommendation.get("fit_score", 0),
+        "grade": recommendation.get("grade", "Watch"),
+        "verdict": recommendation.get("verdict", ""),
+        "target_type": recommendation.get("target_type", ""),
+        "opening_angle": recommendation.get("opening_angle", ""),
+        "suggested_services": recommendation.get("suggested_services", []),
+        "next_steps": recommendation.get("next_steps", []),
+        "score_drivers": recommendation.get("score_drivers", []),
+    }
+
+
 def build_demo_report() -> dict[str, Any]:
     demo_path = ROOT / "examples" / "sample_audit_history.json"
     payload = json.loads(demo_path.read_text(encoding="utf-8"))
@@ -1287,10 +1714,23 @@ def build_demo_report() -> dict[str, Any]:
         external_error=None,
     )
     sales_strategy = build_sales_strategy(corp, analysis, coverage, [], {})
+    firm_persona = get_firm_persona(DEFAULT_FIRM_PERSONA)
+    lead_recommendation = build_lead_recommendation(
+        firm_persona,
+        corp,
+        analysis,
+        sales_strategy,
+        coverage,
+        [],
+        [],
+        {},
+    )
     analysis["sales_strategy"] = sales_strategy
+    analysis["lead_recommendation"] = lead_recommendation
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "source": "Demo fixture",
+        "firm_persona": firm_persona,
         "company": corp,
         "company_profile": {},
         "history": history,
@@ -1304,6 +1744,7 @@ def build_demo_report() -> dict[str, Any]:
         "service_contracts": [],
         "analysis": analysis,
         "sales_strategy": sales_strategy,
+        "lead_recommendation": lead_recommendation,
         "disclaimers": ["Demo data only."],
     }
 
@@ -1325,11 +1766,55 @@ def render_report(payload: dict[str, Any], output_format: str) -> str:
     return render_markdown(payload)
 
 
+def render_recommendations(payload: dict[str, Any], output_format: str) -> str:
+    if output_format == "json":
+        return json.dumps(payload, ensure_ascii=False, indent=2)
+    firm = payload.get("firm_persona", {})
+    lines = [
+        "# Samil Audit Radar Recommendations",
+        "",
+        f"- 검색어: **{payload.get('query', '')}**",
+        f"- 페르소나: **{firm.get('label', '')}**",
+        f"- 생성시각: `{payload.get('generated_at', '')}`",
+        "",
+        "## 추천 후보",
+        "",
+    ]
+    recommendations = payload.get("recommendations", [])
+    if not recommendations:
+        lines.append("- 추천 후보를 만들 수 없습니다.")
+    for index, item in enumerate(recommendations, start=1):
+        company = item.get("company", {})
+        lines.extend(
+            [
+                f"### {index}. {company.get('corp_name', '')}",
+                "",
+                f"- 추천등급: **{item.get('grade', '')} / {item.get('fit_score', 0)}점**",
+                f"- 판단: {item.get('verdict', '')}",
+                f"- 현재 감사인: {item.get('current_auditor') or '-'}",
+                f"- 세그먼트: {item.get('segment', '')}",
+                f"- 케이스: {item.get('sales_case', '')}",
+                f"- 첫 컨택 각도: {item.get('opening_angle', '')}",
+            ]
+        )
+        for service in item.get("suggested_services", [])[:3]:
+            lines.append(f"- 제안 서비스: {service}")
+        for step in item.get("next_steps", [])[:3]:
+            lines.append(f"- 다음 확인: {step}")
+        lines.append("")
+    if payload.get("errors"):
+        lines.extend(["## 조회 실패", ""])
+        for error in payload["errors"]:
+            lines.append(f"- {error.get('corp_name', '')}: {error.get('error', '')}")
+    return "\n".join(lines).rstrip()
+
+
 def render_markdown(payload: dict[str, Any]) -> str:
     company = payload["company"]
     analysis = payload["analysis"]
     event = analysis.get("estimated_event", {})
     sales_strategy = payload.get("sales_strategy") or analysis.get("sales_strategy") or {}
+    lead_recommendation = payload.get("lead_recommendation") or analysis.get("lead_recommendation") or {}
     lines = [
         "# Samil Audit Radar Report",
         "",
@@ -1358,6 +1843,27 @@ def render_markdown(payload: dict[str, Any]) -> str:
         )
         if analysis.get("latest_source_note"):
             lines.append(f"- 출처 메모: {analysis['latest_source_note']}")
+
+    if lead_recommendation:
+        firm = lead_recommendation.get("firm", {})
+        lines.extend(
+            [
+                "",
+                "## 삼일PwC 추천 판단",
+                "",
+                f"- 페르소나: **{firm.get('label', '')}**",
+                f"- 추천등급: **{lead_recommendation.get('grade', '')} / {lead_recommendation.get('fit_score', 0)}점**",
+                f"- 판단: **{lead_recommendation.get('verdict', '')}**",
+                f"- 리드 유형: {lead_recommendation.get('target_type', '')}",
+                f"- 첫 컨택 각도: {lead_recommendation.get('opening_angle', '')}",
+            ]
+        )
+        for service in lead_recommendation.get("suggested_services", [])[:4]:
+            lines.append(f"- 제안 서비스: {service}")
+        for driver in lead_recommendation.get("score_drivers", []):
+            lines.append(
+                f"- 점수 근거: {driver.get('label', '')} {driver.get('points', 0)}점 - {driver.get('evidence', '')}"
+            )
 
     if sales_strategy:
         segment = sales_strategy.get("company_segment", {})
@@ -1577,6 +2083,26 @@ def make_handler(config: AppConfig) -> type[BaseHTTPRequestHandler]:
                         cached(cache_key, lambda: search_companies(q, config, limit=10))
                     )
                     return
+                if parsed.path == "/api/recommend":
+                    q = first(query, "q")
+                    if not q:
+                        self.respond_json({"error": "검색어를 입력하세요."}, status=400)
+                        return
+                    years = clamp_years(int_or_zero(first(query, "years") or DEFAULT_YEARS))
+                    limit = max(1, min(MAX_RECOMMENDATIONS, int_or_zero(first(query, "limit") or MAX_RECOMMENDATIONS)))
+                    cache_key = f"recommend:{q}:{years}:{limit}"
+                    self.respond_json(
+                        cached(
+                            cache_key,
+                            lambda: build_recommendations(
+                                q,
+                                config,
+                                years=years,
+                                limit=limit,
+                            ),
+                        )
+                    )
+                    return
                 if parsed.path == "/api/report":
                     company = first(query, "company")
                     corp_code = first(query, "corp_code") or None
@@ -1692,7 +2218,7 @@ INDEX_HTML = r"""<!doctype html>
     h1 { margin: 0; font-size: 24px; letter-spacing: 0; }
     h2 { font-size: 16px; margin: 0 0 12px; }
     .subtitle { margin-top: 5px; color: #bfdbfe; font-size: 13px; }
-    .toolbar { display: grid; grid-template-columns: 1fr 116px 92px; gap: 10px; margin: 0; }
+    .toolbar { display: grid; grid-template-columns: 1fr 116px 92px 92px; gap: 10px; margin: 0; }
     input, select, button { font: inherit; height: 44px; border: 1px solid var(--line); border-radius: 6px; padding: 0 12px; background: #fff; color: var(--ink); }
     input:focus, select:focus { outline: 2px solid rgba(37, 99, 235, 0.22); border-color: var(--brand); }
     button { background: var(--brand); color: #fff; border-color: var(--brand); cursor: pointer; font-weight: 700; }
@@ -1711,6 +2237,22 @@ INDEX_HTML = r"""<!doctype html>
     .metric strong { display: block; margin-top: 8px; font-size: 18px; line-height: 1.25; }
     .event { border-left: 4px solid var(--brand); padding: 12px 14px; background: var(--brand-soft); margin-bottom: 14px; border-radius: 4px; }
     .event small { color: #46617f; }
+    .recommendation { border: 1px solid #96c4ff; border-left: 4px solid #0f3f88; background: #f8fbff; border-radius: 6px; padding: 14px; margin-bottom: 14px; }
+    .recommendation h3 { margin: 0 0 10px; font-size: 15px; }
+    .recommendation-score { display: grid; grid-template-columns: 112px 1fr; gap: 12px; align-items: center; }
+    .score-ring { display: grid; place-items: center; min-height: 86px; border-radius: 8px; background: #0f3f88; color: #fff; }
+    .score-ring strong { display: block; font-size: 24px; line-height: 1; }
+    .score-ring span { display: block; margin-top: 5px; color: #bfdbfe; font-size: 12px; }
+    .recommendation-body strong { display: block; font-size: 16px; line-height: 1.35; }
+    .recommendation-body p { margin: 6px 0 0; color: #29425f; line-height: 1.45; }
+    .driver-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 12px; }
+    .driver { border: 1px solid #cfe0f6; border-radius: 6px; padding: 8px; background: #fff; min-width: 0; }
+    .driver span { display: block; color: var(--muted); font-size: 11px; }
+    .driver strong { display: block; margin-top: 4px; font-size: 14px; }
+    .recommend-list { display: grid; gap: 10px; }
+    .recommend-card { border: 1px solid #cfe0f6; border-left: 4px solid var(--brand); border-radius: 6px; padding: 12px; background: #f8fbff; }
+    .recommend-card h3 { margin: 0 0 8px; font-size: 15px; }
+    .recommend-card p { margin: 6px 0 0; color: #29425f; line-height: 1.45; }
     .strategy { border: 1px solid #b9d5ff; border-left: 4px solid var(--brand); background: #f8fbff; border-radius: 6px; padding: 14px; margin-bottom: 14px; }
     .strategy h3 { margin: 0 0 10px; font-size: 15px; }
     .case-badges { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
@@ -1738,7 +2280,7 @@ INDEX_HTML = r"""<!doctype html>
     ul { margin: 8px 0 0 18px; padding: 0; }
     li { margin: 5px 0; }
     @media (max-width: 860px) {
-      .toolbar, .grid, .summary, .coverage-grid, .strategy-grid { grid-template-columns: 1fr; }
+      .toolbar, .grid, .summary, .coverage-grid, .strategy-grid, .recommendation-score, .driver-grid { grid-template-columns: 1fr; }
       main { padding: 14px; }
     }
   </style>
@@ -1758,6 +2300,7 @@ INDEX_HTML = r"""<!doctype html>
           <option value="12">12년</option>
         </select>
         <button id="searchBtn">검색</button>
+        <button id="recommendBtn">추천</button>
       </div>
       <div class="status" id="status"></div>
     </section>
@@ -1775,6 +2318,7 @@ INDEX_HTML = r"""<!doctype html>
   <script>
     const $ = (id) => document.getElementById(id);
     $("searchBtn").addEventListener("click", search);
+    $("recommendBtn").addEventListener("click", recommend);
     $("query").addEventListener("keydown", (event) => { if (event.key === "Enter") search(); });
 
     async function getJson(url) {
@@ -1796,6 +2340,21 @@ INDEX_HTML = r"""<!doctype html>
           <strong>${row.corp_name}</strong><span>고유번호 ${row.corp_code} · 종목코드 ${row.stock_code || "-"}</span>
         </button>`).join("") || "검색 결과가 없습니다.";
         document.querySelectorAll(".company").forEach(btn => btn.addEventListener("click", () => loadReport(btn.dataset.name, btn.dataset.code)));
+      } catch (err) {
+        $("status").textContent = err.message;
+      }
+    }
+
+    async function recommend() {
+      const q = $("query").value.trim();
+      if (!q) return;
+      $("status").textContent = "추천 산정 중...";
+      $("report").innerHTML = "추천 후보를 산정하고 있습니다.";
+      try {
+        const years = $("years").value;
+        const data = await getJson(`/api/recommend?q=${encodeURIComponent(q)}&years=${years}&limit=3`);
+        renderRecommendations(data);
+        $("status").textContent = `${(data.recommendations || []).length}개 추천`;
       } catch (err) {
         $("status").textContent = err.message;
       }
@@ -1829,6 +2388,7 @@ INDEX_HTML = r"""<!doctype html>
           <div class="metric"><span>연속연차</span><strong>${a.consecutive_years}년</strong></div>
           <div class="metric"><span>법인구분</span><strong>${esc(a.corp_class_label)}</strong></div>
         </div>
+        ${renderLeadRecommendation(data)}
         <div class="event"><strong>${esc(event.headline)}</strong><br>${esc(event.message)}<br><small>신뢰도: ${esc(a.confidence)} · 최신 출처: ${esc(a.latest_source || "OpenDART")}</small></div>
         ${renderSalesStrategy(data)}
         ${renderCoverage(data)}
@@ -1838,6 +2398,56 @@ INDEX_HTML = r"""<!doctype html>
         ${renderSpecialIssues(data)}
         <h2 style="margin-top:16px;">확인 필요</h2>
         <ul>${(a.follow_up || []).map(item => `<li>${esc(item)}</li>`).join("")}</ul>
+      `;
+    }
+
+    function renderLeadRecommendation(data) {
+      const rec = data.lead_recommendation || (data.analysis || {}).lead_recommendation || {};
+      if (!Object.keys(rec).length) return "";
+      const firm = rec.firm || {};
+      const drivers = rec.score_drivers || [];
+      const services = rec.suggested_services || [];
+      const driverHtml = drivers.map(driver => `<div class="driver"><span>${esc(driver.label)}</span><strong>${esc(driver.points)}점</strong></div>`).join("");
+      const serviceText = services.slice(0, 3).join(" · ");
+      return `<div class="recommendation">
+        <h3>${esc(firm.label || "회계법인")} 추천 판단</h3>
+        <div class="recommendation-score">
+          <div class="score-ring"><strong>${esc(rec.grade || "-")}</strong><span>${esc(rec.fit_score || 0)}점</span></div>
+          <div class="recommendation-body">
+            <strong>${esc(rec.verdict || "-")}</strong>
+            <p>${esc(rec.opening_angle || "")}</p>
+            <p>${esc(serviceText)}</p>
+          </div>
+        </div>
+        <div class="driver-grid">${driverHtml}</div>
+      </div>`;
+    }
+
+    function renderRecommendations(data) {
+      const firm = data.firm_persona || {};
+      const rows = data.recommendations || [];
+      if (!rows.length) {
+        $("report").innerHTML = `<div class="report-meta"><div><span>추천 페르소나</span><strong>${esc(firm.label || "-")}</strong></div><div class="badge">추천 없음</div></div><p>추천 후보를 만들 수 없습니다.</p>`;
+        return;
+      }
+      $("report").innerHTML = `
+        <div class="report-meta">
+          <div><span>추천 페르소나</span><strong>${esc(firm.label || "-")}</strong></div>
+          <div class="badge">추천 ${rows.length}개</div>
+        </div>
+        <div class="recommend-list">
+          ${rows.map((row, index) => `<div class="recommend-card">
+            <h3>${index + 1}. ${esc(row.company?.corp_name || "-")}</h3>
+            <div class="case-badges">
+              <span class="case-badge">${esc(row.grade)} · ${esc(row.fit_score)}점</span>
+              <span class="case-badge">${esc(row.segment || "-")}</span>
+              <span class="case-badge">${esc(row.sales_case || "-")}</span>
+            </div>
+            <p><strong>${esc(row.verdict || "-")}</strong></p>
+            <p>${esc(row.opening_angle || "")}</p>
+            <p>${esc((row.suggested_services || []).slice(0, 3).join(" · "))}</p>
+          </div>`).join("")}
+        </div>
       `;
     }
 

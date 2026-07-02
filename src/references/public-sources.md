@@ -6,6 +6,12 @@ This plugin is grounded in public audit disclosure and auditor appointment rules
 
 - SamilPwC financial statement audit service: https://www.pwc.com/kr/ko/assurance/financial_statement_audit.html
   - SamilPwC publicly describes audit as an assurance service for companies required to receive external audits under law, shareholder needs, and investor needs.
+- SamilPwC Tax Services: https://www.pwc.com/kr/ko/tax.html
+  - SamilPwC publicly positions tax services around tax risk identification, strategy, new rules, and business opportunities.
+- SamilPwC Deals: https://www.pwc.com/kr/ko/deal.html
+  - SamilPwC publicly lists M&A advisory, due diligence, valuation, restructuring, and private-equity-related services.
+- SamilPwC Aerospace & Defense industry center: https://www.pwc.com/kr/ko/industry/aerospace-and-defense.html
+  - Shows the firm combining assurance, tax, deals, consulting, industry specialists, and PwC global network for sector-focused service.
 - SamilPwC official site: https://www.pwc.com/kr/ko.html
   - SamilPwC publicly lists audit, tax, deals, and digital solutions as service areas.
 
