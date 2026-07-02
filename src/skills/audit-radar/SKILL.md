@@ -1,0 +1,66 @@
+---
+name: audit-radar
+description: Use when researching a Korean company's external auditor, auditor tenure, audit opinion history, OpenDART audit disclosures, periodic auditor designation timing, or external auditor appointment events.
+---
+
+# Samil Audit Radar
+
+Use this skill to produce a focused audit-market research memo for SamilPwC-style work.
+
+The core question is narrow:
+
+> Which auditor is matched to this company, how long has that auditor served, and what audit appointment or periodic designation event may be coming next?
+
+## Data Sources
+
+Use public information only:
+
+- OpenDART corporation code list.
+- OpenDART "회계감사인의 명칭 및 감사의견" API.
+- OpenDART "감사용역체결현황" API when fee/time context is requested.
+- Public FSC/FSS guidance on external auditor appointment and periodic designation.
+
+Do not claim access to SamilPwC internal CRM, independence, audit acceptance, or client systems.
+
+## Commands
+
+From the plugin root:
+
+```bash
+python3 scripts/audit_radar.py search 삼성전자
+python3 scripts/audit_radar.py report 삼성전자 --years 10 --output audit-radar-report.md
+python3 scripts/audit_radar.py serve --port 8765
+```
+
+The tool reads the API key from `DART_API_KEY`, `OPEN_DART_API_KEY`, `OPENDART_API_KEY`, or `.env.local`.
+
+## Interpretation Rules
+
+Always label the timing analysis as an estimate. Public DART data does not always reveal whether an auditor was freely appointed, periodically designated, deferred, or designated for another reason.
+
+High-confidence statements:
+
+- Current auditor shown in the latest available annual report.
+- Recent auditor names and audit opinions shown in OpenDART annual-report API results.
+- Legal/market category from OpenDART `corp_cls`: Y = KOSPI, K = KOSDAQ, N = KONEX, E = other.
+
+Lower-confidence statements:
+
+- Whether the current auditor is a freely appointed auditor or a designated auditor.
+- Whether a private company is a large non-listed company subject to periodic designation.
+- Exact FSS notification timing for a specific company.
+
+## Output Style
+
+For Korean users, answer in Korean.
+
+Lead with:
+
+- current auditor
+- consecutive tenure
+- estimated next event
+- confidence level
+- why the conclusion is limited
+
+Then show the year-by-year audit history table and follow-up checks.
+

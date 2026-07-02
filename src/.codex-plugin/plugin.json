@@ -1,0 +1,22 @@
+{
+  "name": "samil-audit-radar",
+  "version": "0.1.0",
+  "description": "Track Korean companies' external auditors, auditor tenure, and periodic designation timing from OpenDART.",
+  "author": {
+    "name": "AX Hackathon Participant"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Samil Audit Radar",
+    "shortDescription": "Find auditor tenure and next audit appointment events.",
+    "longDescription": "A Codex plugin for SamilPwC-style audit market research. It uses OpenDART public disclosures to identify a company's current auditor, recent auditor history, consecutive auditor tenure, and likely periodic designation or free-appointment timing.",
+    "developerName": "AX Hackathon Participant",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write"],
+    "defaultPrompt": [
+      "기업명으로 감사인 연속연차를 조회해줘.",
+      "OpenDART 기반 감사인 지정 타이밍을 분석해줘.",
+      "Samil Audit Radar 웹서비스를 실행해줘."
+    ]
+  }
+}

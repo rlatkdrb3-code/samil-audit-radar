@@ -1,0 +1,9 @@
+.env
+.env.*
+!.env.example
+.cache/
+logs/
+__pycache__/
+*.pyc
+submission.zip
+.DS_Store

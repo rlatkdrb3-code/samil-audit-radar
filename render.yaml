@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: samil-audit-radar
+    runtime: python
+    plan: free
+    buildCommand: "python3 -m py_compile src/scripts/audit_radar.py"
+    startCommand: "python3 src/scripts/audit_radar.py serve --host 0.0.0.0"
+    healthCheckPath: /healthz
+    envVars:
+      - key: DART_API_KEY
+        sync: false
+      - key: HOST
+        value: 0.0.0.0

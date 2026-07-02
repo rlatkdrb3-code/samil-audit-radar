@@ -1,0 +1,16 @@
+{
+  "corp_name": "샘플테크",
+  "corp_code": "00000000",
+  "corp_cls": "K",
+  "history": [
+    {"bsns_year": "2025", "adtor": "삼정회계법인", "adt_opinion": "적정"},
+    {"bsns_year": "2024", "adtor": "삼정회계법인", "adt_opinion": "적정"},
+    {"bsns_year": "2023", "adtor": "삼정회계법인", "adt_opinion": "적정"},
+    {"bsns_year": "2022", "adtor": "한영회계법인", "adt_opinion": "적정"},
+    {"bsns_year": "2021", "adtor": "한영회계법인", "adt_opinion": "적정"},
+    {"bsns_year": "2020", "adtor": "한영회계법인", "adt_opinion": "적정"},
+    {"bsns_year": "2019", "adtor": "한영회계법인", "adt_opinion": "적정"},
+    {"bsns_year": "2018", "adtor": "한영회계법인", "adt_opinion": "적정"},
+    {"bsns_year": "2017", "adtor": "한영회계법인", "adt_opinion": "적정"}
+  ]
+}
