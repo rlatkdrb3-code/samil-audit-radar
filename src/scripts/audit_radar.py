@@ -54,6 +54,7 @@ CORP_CLASS_LABELS = {
     "N": "코넥스",
     "E": "기타",
 }
+LISTED_CORP_CLASSES = {"Y", "K", "N"}
 BIG4_ALIASES = {
     "samil": "삼일",
     "pwc": "삼일",
@@ -88,17 +89,16 @@ FINANCIAL_NAME_KEYWORDS = (
     "손해보험",
     "생명보험",
 )
-LIMITED_COMPANY_KEYWORDS = ("유한회사", "유한책임회사", "(유)", "（유）")
 DEFAULT_FIRM_CONTEXT = {
-    "code": "erp_integrated_audit_firm",
-    "label": "ERP 연동 회계법인",
-    "positioning": "회계법인 ERP/CRM의 고객 관계, 산업 강점, 서비스 라인, 제한 신호를 OpenDART 공시와 결합해 감사영업 후보를 추천하는 샘플 컨텍스트",
-    "auditor_aliases": ["우리회계법인", "our audit firm"],
+    "code": "samil_pwc",
+    "label": "삼일PwC",
+    "positioning": "상장사 외부감사와 내부회계관리제도에서 시작해 Tax, Deals, 산업 전문 자문으로 확장하는 회계법인",
+    "auditor_aliases": ["삼일회계법인", "삼일PwC", "Samil PwC", "PricewaterhouseCoopers"],
     "strengths": [
         "외부감사 및 내부회계관리제도 감사",
-        "상장사·대형비상장·금융회사 감사 전환 리서치",
-        "세무 리스크, 딜, 실사, 가치평가 등 인접 서비스 연결",
-        "산업별 담당 파트너와 기존 CRM 관계를 활용한 컨택 우선순위화",
+        "상장사 감사인 교체·지정감사 종료 타이밍 리서치",
+        "세무 리스크, Deals, 실사, 가치평가 등 인접 서비스 연결",
+        "PwC 글로벌 네트워크와 산업별 전문 조직",
     ],
     "service_lines": [
         "외부감사 선임/전환 리서치",
@@ -108,51 +108,15 @@ DEFAULT_FIRM_CONTEXT = {
         "산업 전문 자문",
     ],
     "preferred_leads": [
-        "감사인 교체 또는 자유선임 전환 타이밍이 가까운 회사",
-        "상장사, 대형비상장, 금융회사, 사업보고서 제출대상처럼 공시·통제 요구가 큰 회사",
-        "외부감사 최초 진입, 미제출·정정 등 회계 컴플라이언스 이슈가 보이는 회사",
-        "ERP/CRM상 기존 관계, warm introduction, 산업 포커스와 연결되는 감사 관계 후보",
+        "상장사 중 감사인 교체 또는 자유선임 전환 타이밍이 가까운 회사",
+        "감사보수·감사시간·매출추이 등 공개 데이터로 영업 논리를 만들 수 있는 회사",
+        "감사위원회·감사·사외이사 등 선임 의사결정 후보군을 공개자료로 확인할 수 있는 회사",
+        "삼일PwC의 Tax, Deals, 산업·글로벌 네트워크 자문으로 확장 가능한 감사 관계 후보",
     ],
     "industry_focus_keywords": ["금융", "바이오", "방산", "제조", "플랫폼"],
     "industry_focus_codes": ["21", "26", "30", "64", "65", "66"],
-    "firm_people": [
-        {
-            "person_ref": "partner_industry_01",
-            "role": "감사 파트너",
-            "industry_keywords": ["전자", "제조", "플랫폼"],
-            "industry_codes": ["26", "30"],
-            "domain_tags": ["상장사 감사", "내부회계관리제도", "글로벌 제조"],
-            "education_tags": ["A대 동문"],
-            "career_tags": ["제조업 CFO 네트워크"],
-            "network_tags": ["감사위원 네트워크"],
-            "audit_experience_years": 12,
-        }
-    ],
-    "target_accounts": [
-        {
-            "corp_code": "00000000",
-            "corp_name": "샘플테크",
-            "industry_tags": ["플랫폼", "제조"],
-            "revenue_trend": "최근 3년 매출 성장",
-            "audit_fee_trend": "감사용역 보수 상승",
-            "decision_makers": [
-                {
-                    "role": "감사위원장",
-                    "education_tags": ["A대 동문"],
-                    "career_tags": ["제조업 CFO 네트워크"],
-                    "network_tags": ["감사위원 네트워크"],
-                }
-            ],
-            "relationship_edges": [
-                {
-                    "firm_person_ref": "partner_industry_01",
-                    "target_role": "감사위원장",
-                    "basis": "동문·감사위원 네트워크",
-                    "strength": "warm",
-                }
-            ],
-        }
-    ],
+    "firm_people": [],
+    "target_accounts": [],
     "erp_signals": {
         "relationship_tags": [],
         "restricted_corp_codes": [],
@@ -162,7 +126,7 @@ DEFAULT_FIRM_CONTEXT = {
     "public_basis": [
         "OpenDART 공개 공시",
         "외부감사법상 감사인 선임·지정 제도",
-        "회계법인 ERP/CRM에 저장 가능한 고객 관계·산업·제한 신호의 샘플 스키마",
+        "삼일PwC 공개 서비스 영역과 상장사 정기보고서 주요정보",
     ],
 }
 DEFAULT_FIRM_PERSONA = DEFAULT_FIRM_CONTEXT["code"]
@@ -176,7 +140,7 @@ class AppConfig:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Audit Lead Radar")
+    parser = argparse.ArgumentParser(description="Samil Listed Audit Radar")
     sub = parser.add_subparsers(dest="command", required=True)
 
     search = sub.add_parser("search", help="Search OpenDART corporation codes")
@@ -358,6 +322,8 @@ def search_companies(query: str, config: AppConfig, *, limit: int = 10) -> list[
     companies = load_corp_codes(config)
     scored = []
     for company in companies:
+        if not is_listed_search_candidate(company):
+            continue
         name = normalize_search(company.get("corp_name", ""))
         stock_code = company.get("stock_code", "")
         corp_code = company.get("corp_code", "")
@@ -376,6 +342,16 @@ def search_companies(query: str, config: AppConfig, *, limit: int = 10) -> list[
             scored.append((score, company))
     scored.sort(key=lambda item: (-item[0], item[1].get("corp_name", "")))
     return [item for _, item in scored[:limit]]
+
+
+def is_listed_search_candidate(company: dict[str, str]) -> bool:
+    return bool(str(company.get("stock_code", "")).strip()) or company.get("corp_cls") in LISTED_CORP_CLASSES
+
+
+def is_listed_company(corp: dict[str, Any]) -> bool:
+    corp_cls = str(corp.get("corp_cls", "")).strip()
+    stock_code = str(corp.get("stock_code", "")).strip()
+    return corp_cls in LISTED_CORP_CLASSES or bool(stock_code)
 
 
 def normalize_search(value: str) -> str:
@@ -440,6 +416,8 @@ def build_report(
     corp = resolve_company(company[:80], config, corp_code=corp_code)
     company_profile = fetch_company_profile(corp["corp_code"], config)
     corp = enrich_company(corp, company_profile)
+    if not is_listed_company(corp):
+        raise RuntimeError("현재 버전은 코스피·코스닥·코넥스 상장사만 지원합니다.")
     structured_history = fetch_audit_history(corp["corp_code"], config, years=years)
     disclosure_bundle = fetch_external_audit_disclosures(corp["corp_code"], config, years=years)
     audit_history = merge_audit_sources(
@@ -448,6 +426,7 @@ def build_report(
         years=years,
     )
     service_history = fetch_service_contracts(corp["corp_code"], config, years=min(years, 5))
+    executive_history = fetch_executive_status(corp["corp_code"], config, years=min(years, 3))
     analysis = analyze_history(corp, audit_history, config.current_year)
     if disclosure_bundle["special_issues"] and analysis.get("status") == "ok":
         analysis.setdefault("follow_up", []).insert(
@@ -498,13 +477,15 @@ def build_report(
         "special_issues": disclosure_bundle["special_issues"],
         "coverage": coverage,
         "service_contracts": service_history,
+        "executives": executive_history,
         "analysis": analysis,
         "sales_strategy": sales_strategy,
         "lead_recommendation": lead_recommendation,
         "disclaimers": [
-            "Public DART data does not directly label free appointment, periodic designation, split designation, deferral, or all private-company eligibility facts.",
+            "This version is scoped to listed companies with stock codes in OpenDART.",
+            "Public DART data does not directly label free appointment, periodic designation, split designation, or deferral facts.",
             "Recommendations combine public filing signals with the configured firm context; they are not audit acceptance, independence, conflict, or quality-control decisions.",
-            "Sales case segmentation uses public filing signals only; large private-company, financial-company, limited-company, and external-audit threshold status must be confirmed against source documents.",
+            "Executive education is not a stable structured OpenDART field; it may appear only inside the main career text and should not be over-interpreted.",
             "External-audit disclosure rows use DART filing-list metadata and should be checked against the original audit report when used for outreach or acceptance decisions.",
             "Missing-year notes mean the plugin did not find a matching public filing in the searched window; they are not proof of legal non-submission.",
             "The timing result is an estimate for research and follow-up planning, not a legal or audit acceptance conclusion.",
@@ -875,6 +856,72 @@ def fetch_service_contracts(corp_code: str, config: AppConfig, *, years: int) ->
     return contracts
 
 
+def fetch_executive_status(corp_code: str, config: AppConfig, *, years: int) -> list[dict[str, Any]]:
+    if config.demo:
+        return demo_executives()
+    start_year = config.current_year - 1
+    fetch_years = list(range(start_year, start_year - years, -1))
+    for year, rows in fetch_yearly_payloads("exctvSttus", corp_code, config, fetch_years):
+        normalized = [normalize_executive_row(row, year) for row in rows if is_meaningful_value(row.get("nm", ""))]
+        if normalized:
+            return rank_executive_rows(normalized)[:20]
+    return []
+
+
+def normalize_executive_row(row: dict[str, Any], business_year: int) -> dict[str, Any]:
+    item = normalize_disclosure_row(row, business_year)
+    item["decision_role_signal"] = executive_decision_role_signal(item)
+    item["rcept_url"] = dart_viewer_url(item.get("rcept_no", ""))
+    return item
+
+
+def executive_decision_role_signal(row: dict[str, Any]) -> str:
+    text = normalize_search(
+        " ".join(
+            [
+                str(row.get("ofcps", "")),
+                str(row.get("chrg_job", "")),
+                str(row.get("main_career", "")),
+            ]
+        )
+    )
+    if "감사위원" in text:
+        return "감사위원회 후보"
+    if "감사" in text:
+        return "감사 후보"
+    if "사외이사" in text:
+        return "사외이사 후보"
+    if "대표이사" in text or "ceo" in text:
+        return "대표이사"
+    return ""
+
+
+def rank_executive_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def priority(row: dict[str, Any]) -> tuple[int, str]:
+        signal = row.get("decision_role_signal", "")
+        score = 0
+        if signal in {"감사위원회 후보", "감사 후보"}:
+            score += 4
+        elif signal == "사외이사 후보":
+            score += 3
+        elif signal == "대표이사":
+            score += 2
+        if str(row.get("rgist_exctv_at", "")).strip() == "등기임원":
+            score += 1
+        return -score, str(row.get("nm", ""))
+
+    deduped: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for row in rows:
+        key = (
+            str(row.get("nm", "")).strip(),
+            str(row.get("ofcps", "")).strip(),
+            str(row.get("chrg_job", "")).strip(),
+        )
+        if key not in deduped:
+            deduped[key] = row
+    return sorted(deduped.values(), key=priority)
+
+
 def analyze_history(corp: dict[str, str], history: list[dict[str, Any]], current_year: int) -> dict[str, Any]:
     if not history:
         return {
@@ -977,9 +1024,9 @@ def periodic_subject_estimate(corp: dict[str, str], corp_cls: str) -> dict[str, 
             "reason": "코넥스 회사는 주기적 지정 적용 여부와 예외를 별도 확인해야 합니다.",
         }
     return {
-        "status": "unknown_private",
+        "status": "out_of_listed_scope",
         "label": CORP_CLASS_LABELS.get(corp_cls, "기타/알 수 없음"),
-        "reason": "공개 API의 법인구분만으로 대형비상장·소유경영미분리 여부를 확정할 수 없습니다.",
+        "reason": "현재 버전은 코스피·코스닥·코넥스 상장사만 분석 대상으로 삼습니다.",
     }
 
 
@@ -990,13 +1037,13 @@ def estimate_event(
 ) -> dict[str, Any]:
     length = latest_run["length"]
     subject_status = subject["status"]
-    if subject_status == "unknown_private":
+    if subject_status == "out_of_listed_scope":
         return {
-            "type": "insufficient_private_company_data",
-            "headline": "비상장 주기적 지정 대상 여부 확인 필요",
+            "type": "out_of_listed_scope",
+            "headline": "상장사 범위 밖: 분석 제외",
             "confidence": "low",
             "years_remaining": None,
-            "message": "공개 법인구분만으로 대형비상장 및 소유·경영 미분리 요건을 판단할 수 없습니다.",
+            "message": "현재 버전은 상장사 공개 데이터 기반 영업 레이더로 제한되어 있습니다.",
         }
 
     if previous_run and length <= 3 and previous_run["length"] >= 6:
@@ -1051,7 +1098,7 @@ def build_follow_up(subject: dict[str, str], event: dict[str, Any]) -> list[str]
         "감사위원회 또는 감사인선임위원회 승인 및 선임보고 기한 확인",
     ]
     if subject["status"] != "likely_subject":
-        checks.append("대형비상장회사, 금융회사, 사업보고서 제출대상 여부 확인")
+        checks.append("코넥스 또는 기타 예외의 주기적 지정 적용 여부 확인")
     if event["type"] == "possible_designated_cycle":
         checks.append("지정감사 종료 후 최초 자유선임 시 전기 지정감사인 배제 규정 적용 여부 확인")
     if event["type"] in {"six_year_threshold_reached", "approaching_six_year_threshold"}:
@@ -1075,9 +1122,9 @@ def build_sales_strategy(
         "sales_case": sales_case,
         "case_badges": build_case_badges(segment, flags, sales_case, special_issues),
         "legal_rule_refs": [
-            "주권상장법인, 대형비상장주식회사, 금융회사는 연속 3개 사업연도 동일 감사인 선임 의무가 있습니다.",
-            "일반 회사는 원칙적으로 사업연도 개시일부터 45일 이내, 최초 외부감사 대상 연도는 4개월 이내 감사인을 선임합니다.",
-            "외부감사 대상 요건은 자산 500억원, 매출 500억원, 또는 자산·부채·매출·종업원 기준 중 2개 이상 충족 여부 등을 별도로 확인해야 합니다.",
+            "주권상장법인은 연속 3개 사업연도 동일 감사인 선임 의무가 있습니다.",
+            "주기적 지정제는 상장회사 등에 대해 6년 자유선임 후 3년 지정감사 구조로 적용될 수 있습니다.",
+            "감사위원회 설치 회사는 감사위원회가 외부감사인을 선정하는 구조를 우선 확인해야 합니다.",
         ],
     }
 
@@ -1106,37 +1153,10 @@ def estimate_company_segment(
             "evidence": evidence or ["OpenDART 법인구분상 상장회사 신호가 있습니다."],
         }
 
-    if int_or_zero(coverage.get("periodic_report_api_rows")) > 0:
-        evidence.append("정기보고서 주요정보 API에서 감사인 이력이 확인됩니다.")
-        return {
-            "code": "large_private_or_business_report_filer_candidate",
-            "label": "대형비상장/사업보고서 제출대상 후보",
-            "confidence": "medium",
-            "evidence": evidence,
-        }
-
-    if int_or_zero(coverage.get("external_audit_report_rows")) > 0:
-        evidence.append("외부감사관련 감사보고서 공시목록에서 감사보고서가 확인됩니다.")
-        return {
-            "code": "private_audit_subject",
-            "label": "비상장 외감대상 공시 확인",
-            "confidence": "medium",
-            "evidence": evidence,
-        }
-
-    if special_issues:
-        evidence.append("외부감사관련 미제출·지연·정정 등 특이공시가 확인됩니다.")
-        return {
-            "code": "private_audit_subject_candidate",
-            "label": "외감대상 후보(특이공시 확인)",
-            "confidence": "medium",
-            "evidence": evidence,
-        }
-
-    evidence.append("OpenDART 공개 데이터만으로 외부감사 대상 여부와 재무요건을 확정할 수 없습니다.")
+    evidence.append("현재 버전의 상장사 분석 범위 밖입니다.")
     return {
-        "code": "audit_threshold_candidate",
-        "label": "외감요건 후보 확인 필요",
+        "code": "out_of_listed_scope",
+        "label": "상장사 범위 밖",
         "confidence": "low",
         "evidence": evidence,
     }
@@ -1158,16 +1178,6 @@ def estimate_segment_flags(
             }
         )
 
-    limited_evidence = limited_company_evidence(corp, company_profile)
-    if limited_evidence:
-        flags.append(
-            {
-                "code": "limited_company_candidate",
-                "label": "유한회사 추정",
-                "confidence": "medium",
-                "evidence": limited_evidence,
-            }
-        )
     return flags
 
 
@@ -1192,25 +1202,6 @@ def financial_company_evidence(
     if matched:
         evidence.append(f"회사명에 금융회사 키워드({', '.join(sorted(set(matched)))})가 포함됩니다.")
     return evidence
-
-
-def limited_company_evidence(
-    corp: dict[str, str],
-    company_profile: dict[str, Any],
-) -> list[str]:
-    name = " ".join(
-        str(value or "")
-        for value in (
-            corp.get("corp_name"),
-            corp.get("stock_name"),
-            company_profile.get("corp_name"),
-            company_profile.get("stock_name"),
-        )
-    )
-    matched = [keyword for keyword in LIMITED_COMPANY_KEYWORDS if keyword in name]
-    if not matched:
-        return []
-    return [f"회사명에 유한회사 신호({', '.join(sorted(set(matched)))})가 포함됩니다."]
 
 
 def estimate_sales_case(
@@ -1245,7 +1236,7 @@ def estimate_sales_case(
                 "label": "데이터 보강 필요",
                 "priority": "low",
                 "timing": "리드 검증 단계",
-                "next_action": "회사명·고유번호를 재확인하고 DART 원문, 감사계약 체결보고, 외감대상 재무요건을 수동으로 확인하세요.",
+                "next_action": "회사명·고유번호를 재확인하고 DART 원문, 감사계약 체결보고, 상장사 여부를 수동으로 확인하세요.",
                 "rationale": "최근 감사인 이력이 공개 API와 외부감사관련 공시목록에서 확인되지 않았습니다.",
             }
         case["caveats"] = caveats
@@ -1281,24 +1272,6 @@ def estimate_sales_case(
             "next_action": "현재 감사인 유지가 계속되는지 모니터링하고, 지정제·유예제 적용 여부를 선제 확인하세요.",
             "rationale": event.get("message", ""),
         }
-    elif segment_code == "large_private_or_business_report_filer_candidate":
-        case = {
-            "code": "three_year_renewal_cycle",
-            "label": "3년 선임 사이클 확인",
-            "priority": "medium",
-            "timing": "감사계약 만료 전",
-            "next_action": "대형비상장·사업보고서 제출대상·공시대상기업집단 여부와 3개 사업연도 동일 감사인 선임 구간을 확인하세요.",
-            "rationale": "정기보고서 API에서 감사인 이력이 확인되어 상장사는 아니지만 공시 규율이 강한 회사일 가능성이 있습니다.",
-        }
-    elif segment_code in {"private_audit_subject", "private_audit_subject_candidate"}:
-        case = {
-            "code": "annual_appointment_window",
-            "label": "비상장 선임창 모니터링",
-            "priority": "medium",
-            "timing": "사업연도 개시 후 45일/최초 외감 4개월 기준 확인",
-            "next_action": "일반 비상장 외감대상인지, 최초 외감인지, 전기 감사인을 재선임했는지 확인하고 선임보고 일정에 맞춰 컨택하세요.",
-            "rationale": "외부감사관련 감사보고서 또는 특이공시가 확인되어 비상장 외감대상 리드로 볼 수 있습니다.",
-        }
     elif segment_code == "listed":
         case = {
             "code": "listed_monitoring",
@@ -1310,12 +1283,12 @@ def estimate_sales_case(
         }
     else:
         case = {
-            "code": "audit_threshold_candidate_research",
-            "label": "외감요건 충족 후보 검증",
+            "code": "out_of_listed_scope",
+            "label": "상장사 범위 밖",
             "priority": "low",
             "timing": "리드 선별 단계",
-            "next_action": "자산·매출·부채·종업원 수, 유한회사 사원 수, 사업보고서 제출대상 여부를 추가 자료로 확인하세요.",
-            "rationale": "공개 API만으로 외부감사 대상 여부를 확정할 수 없습니다.",
+            "next_action": "상장사 분석 대상인지 먼저 확인하고, 범위 밖이면 별도 리서치 프로세스로 넘기세요.",
+            "rationale": "현재 버전은 상장사 OpenDART 데이터만 대상으로 합니다.",
         }
 
     if has_special_issues:
@@ -1325,10 +1298,6 @@ def estimate_sales_case(
     flag_codes = {flag.get("code") for flag in flags}
     if "financial_candidate" in flag_codes:
         caveats.append("금융회사 추정 신호가 있어 금융회사 지배구조법 적용, 감사위원회, 3년 선임 의무를 별도 확인해야 합니다.")
-    if "limited_company_candidate" in flag_codes:
-        caveats.append("유한회사 추정 신호가 있어 사원총회 승인, 감사 유무, 외감대상 세부 요건을 별도 확인해야 합니다.")
-    if segment_code == "large_private_or_business_report_filer_candidate":
-        caveats.append("대형비상장 여부는 자산총액 5천억원 또는 사업보고서 제출대상·공시대상기업집단 예외 기준 확인 전까지 확정하지 않습니다.")
     if coverage.get("missing_recent_years"):
         caveats.append("최근 공시 미확인 연도는 미제출이 아니라 API·명칭·비대상 가능성도 있습니다.")
 
@@ -1526,13 +1495,11 @@ def lead_timing_points(sales_case: dict[str, Any], event: dict[str, Any]) -> tup
     priority = sales_case.get("priority", "")
     if code == "designation_exit_opportunity":
         points = 34 if event.get("years_remaining") == 0 else 28
-    elif code in {"periodic_designation_watch", "three_year_renewal_cycle"}:
+    elif code == "periodic_designation_watch":
         points = 26 if priority == "high" else 22
-    elif code == "annual_appointment_window":
-        points = 22
     elif code == "compliance_risk_watch":
         points = 20
-    elif code in {"listed_monitoring", "audit_threshold_candidate_research"}:
+    elif code == "listed_monitoring":
         points = 12
     else:
         points = 8
@@ -1543,17 +1510,12 @@ def lead_segment_points(segment: dict[str, Any], flags: list[dict[str, Any]]) ->
     code = segment.get("code", "")
     points_by_segment = {
         "listed": 18,
-        "large_private_or_business_report_filer_candidate": 21,
-        "private_audit_subject": 17,
-        "private_audit_subject_candidate": 14,
-        "audit_threshold_candidate": 9,
+        "out_of_listed_scope": 4,
     }
     points = points_by_segment.get(code, 8)
     flag_codes = {flag.get("code") for flag in flags}
     if "financial_candidate" in flag_codes:
         points += 5
-    if "limited_company_candidate" in flag_codes:
-        points += 3
     evidence = segment.get("label", "세그먼트 확인 필요")
     if flags:
         evidence += " · " + " · ".join(flag.get("label", "") for flag in flags)
@@ -1595,16 +1557,13 @@ def lead_expansion_points(
     points = 8
     reasons = []
     segment_code = segment.get("code", "")
-    if segment_code in {"listed", "large_private_or_business_report_filer_candidate"}:
+    if segment_code == "listed":
         points += 5
         reasons.append("공시·내부통제·세무 이슈 확장 가능")
     flag_codes = {flag.get("code") for flag in flags}
     if "financial_candidate" in flag_codes:
         points += 4
         reasons.append("금융회사 규제·내부통제 자문 연결 가능")
-    if "limited_company_candidate" in flag_codes:
-        points += 2
-        reasons.append("유한회사 외감요건·지배구조 확인 수요")
     if service_contracts:
         points += 2
         reasons.append("감사용역 보수·시간 데이터 확인 가능")
@@ -1915,15 +1874,9 @@ def build_opening_angle(
         return "지정감사 종료 후 자유선임 전환 가능 시점을 근거로 사전 관계 형성"
     if case_code == "periodic_designation_watch":
         return "주기적 지정·유예·분산지정 판단을 돕는 제도 점검 미팅 제안"
-    if case_code == "three_year_renewal_cycle":
-        return "3년 선임 사이클과 대형비상장/사업보고서 제출대상 여부 점검"
-    if case_code == "annual_appointment_window":
-        return "일반 비상장 외감대상 선임기한과 최초 외감 온보딩 이슈로 접근"
     flag_codes = {flag.get("code") for flag in flags}
     if "financial_candidate" in flag_codes:
         return "금융회사 규제·내부통제·감사위원회 맥락에서 감사 품질과 전환 가능성 점검"
-    if segment.get("code") == "audit_threshold_candidate":
-        return "외감요건 충족 가능성 진단을 시작점으로 감사·세무 기초 리드 발굴"
     return f"{persona.get('label', '회계법인')}의 감사·세무·딜 네트워크 적합성 검토"
 
 
@@ -1943,13 +1896,9 @@ def suggested_services_for_persona(
     case_code = sales_case.get("code", "")
     if case_code in {"designation_exit_opportunity", "periodic_designation_watch"}:
         services.append("주기적 지정·자유선임 전환 사전 진단")
-    if segment.get("code") in {"large_private_or_business_report_filer_candidate", "private_audit_subject"}:
-        services.append("외감대상 요건 및 선임보고 일정 점검")
     flag_codes = {flag.get("code") for flag in flags}
     if "financial_candidate" in flag_codes:
         services.append("금융규제·리스크관리·내부통제 자문")
-    if "limited_company_candidate" in flag_codes:
-        services.append("유한회사 외감요건 및 지배구조 점검")
     services.append("세무 리스크 및 Deals 기회 사전 스크리닝")
     return services[:5]
 
@@ -1971,12 +1920,10 @@ def build_recommendation_next_steps(
         steps.append("ERP/CRM에서 기존 관계, 제한 계정, 담당 파트너, 산업 담당 조직 매칭 여부 확인")
         steps.append("감사인 선임 의사결정권자와 내부 인력 간 합법 보유 관계 신호를 확인")
     steps.append(sales_case.get("next_action", "감사인 선임보고 및 원문 공시 확인"))
-    if segment.get("code") in {"large_private_or_business_report_filer_candidate", "audit_threshold_candidate"}:
-        steps.append("자산·매출·부채·종업원 수와 사업보고서 제출대상 여부 확인")
     if special_issues:
         steps.append("미제출·지연·정정 공시 원문에서 사유와 후속 제출 여부 확인")
     if flags:
-        steps.append("금융회사·유한회사 등 보조 플래그의 법적 요건을 별도 확인")
+        steps.append("금융회사 보조 플래그의 법적 요건과 감사위원회 구조를 별도 확인")
     return steps[:5]
 
 
@@ -2098,10 +2045,11 @@ def build_demo_report() -> dict[str, Any]:
     corp = {
         "corp_code": payload["corp_code"],
         "corp_name": payload["corp_name"],
-        "stock_code": "",
+        "stock_code": payload.get("stock_code", "000000"),
         "modify_date": "",
         "corp_cls": payload["corp_cls"],
     }
+    executives = demo_executives()
     analysis = analyze_history(corp, history, date.today().year)
     coverage = build_coverage_summary(
         history,
@@ -2141,10 +2089,14 @@ def build_demo_report() -> dict[str, Any]:
         "special_issues": [],
         "coverage": coverage,
         "service_contracts": [],
+        "executives": executives,
         "analysis": analysis,
         "sales_strategy": sales_strategy,
         "lead_recommendation": lead_recommendation,
-        "disclaimers": ["Demo data only."],
+        "disclaimers": [
+            "Demo data only.",
+            "임원 학력은 OpenDART 구조화 필드가 아니며, 데모의 주요경력 문구는 예시입니다.",
+        ],
     }
 
 
@@ -2155,8 +2107,54 @@ def load_demo_companies() -> list[dict[str, str]]:
             "corp_name": "샘플테크",
             "stock_code": "000000",
             "modify_date": "20260702",
+            "corp_cls": "K",
         }
     ]
+
+
+def demo_executives() -> list[dict[str, Any]]:
+    rows = [
+        {
+            "bsns_year": "2025",
+            "nm": "김대표",
+            "ofcps": "대표이사",
+            "rgist_exctv_at": "등기임원",
+            "fte_at": "상근",
+            "chrg_job": "경영총괄",
+            "main_career": "샘플테크 CFO, 글로벌 제조사업 총괄",
+            "mxmm_shrholdr_relate": "-",
+            "hffc_pd": "4년",
+            "tenure_end_on": "2027.03",
+            "rcept_no": "",
+        },
+        {
+            "bsns_year": "2025",
+            "nm": "박감사",
+            "ofcps": "사외이사",
+            "rgist_exctv_at": "등기임원",
+            "fte_at": "비상근",
+            "chrg_job": "감사위원회 위원장",
+            "main_career": "회계감독 실무, 상장사 감사위원회 운영 자문",
+            "mxmm_shrholdr_relate": "-",
+            "hffc_pd": "2년",
+            "tenure_end_on": "2028.03",
+            "rcept_no": "",
+        },
+        {
+            "bsns_year": "2025",
+            "nm": "이위원",
+            "ofcps": "사외이사",
+            "rgist_exctv_at": "등기임원",
+            "fte_at": "비상근",
+            "chrg_job": "감사위원",
+            "main_career": "제조업 재무담당 임원, 내부회계관리제도 구축 프로젝트",
+            "mxmm_shrholdr_relate": "-",
+            "hffc_pd": "1년",
+            "tenure_end_on": "2029.03",
+            "rcept_no": "",
+        },
+    ]
+    return rank_executive_rows([normalize_executive_row(row, 2025) for row in rows])
 
 
 def render_report(payload: dict[str, Any], output_format: str) -> str:
@@ -2170,7 +2168,7 @@ def render_recommendations(payload: dict[str, Any], output_format: str) -> str:
         return json.dumps(payload, ensure_ascii=False, indent=2)
     firm = payload.get("firm_persona", {})
     lines = [
-        "# Audit Lead Radar Recommendations",
+        "# Samil Listed Audit Radar Recommendations",
         "",
         f"- 검색어: **{payload.get('query', '')}**",
         f"- Firm context: **{firm.get('label', '')}**",
@@ -2215,7 +2213,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
     sales_strategy = payload.get("sales_strategy") or analysis.get("sales_strategy") or {}
     lead_recommendation = payload.get("lead_recommendation") or analysis.get("lead_recommendation") or {}
     lines = [
-        "# Audit Lead Radar Report",
+        "# Samil Listed Audit Radar Report",
         "",
         f"- 회사: **{company.get('corp_name', '')}**",
         f"- 고유번호: `{company.get('corp_code', '')}`",
@@ -2306,6 +2304,33 @@ def render_markdown(payload: dict[str, Any]) -> str:
             lines.append(f"- 최근 공시 미확인 연도: {', '.join(coverage['missing_recent_years'])}")
         for note in coverage.get("notes", []):
             lines.append(f"- {note}")
+
+    executives = payload.get("executives", [])
+    if executives:
+        lines.extend(
+            [
+                "",
+                "## 임원 및 선임 후보군",
+                "",
+                "| 성명 | 직위 | 담당업무 | 등기/상근 | 선임 관련 신호 | 주요 경력 |",
+                "| --- | --- | --- | --- | --- | --- |",
+            ]
+        )
+        for row in executives[:12]:
+            lines.append(
+                "| "
+                + " | ".join(
+                    [
+                        clean_md(row.get("nm", "")),
+                        clean_md(row.get("ofcps", "")),
+                        clean_md(row.get("chrg_job", "")),
+                        clean_md(" / ".join(filter(None, [str(row.get("rgist_exctv_at", "")).strip(), str(row.get("fte_at", "")).strip()]))),
+                        clean_md(row.get("decision_role_signal", "")),
+                        clean_md(shorten(row.get("main_career", ""), 120)),
+                    ]
+                )
+                + " |"
+            )
 
     lines.extend(
         [
@@ -2429,11 +2454,11 @@ def digits_int(value: Any) -> int:
 def run_server(host: str, port: int, config: AppConfig) -> None:
     handler = make_handler(config)
     server = ThreadingHTTPServer((host, port), handler)
-    print(f"Audit Lead Radar running at http://{host}:{port}")
+    print(f"Samil Listed Audit Radar running at http://{host}:{port}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\nStopping Audit Lead Radar.")
+        print("\nStopping Samil Listed Audit Radar.")
 
 
 def make_handler(config: AppConfig) -> type[BaseHTTPRequestHandler]:
@@ -2599,7 +2624,7 @@ INDEX_HTML = r"""<!doctype html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Audit Lead Radar</title>
+  <title>Samil Listed Audit Radar</title>
   <style>
     :root {
       color-scheme: light;
@@ -2692,13 +2717,13 @@ INDEX_HTML = r"""<!doctype html>
 </head>
 <body>
   <header>
-    <h1>Audit Lead Radar</h1>
-    <div class="subtitle">ERP/CRM firm context + OpenDART 기반 감사영업 후보 추천</div>
+    <h1>Samil Listed Audit Radar</h1>
+    <div class="subtitle">상장사 OpenDART 기반 감사인·감사보수·임원 주요경력 레이더</div>
   </header>
   <main>
     <section class="panel search-panel">
       <div class="toolbar">
-        <input id="query" placeholder="기업명, 종목코드, 고유번호" value="삼성전자" />
+        <input id="query" placeholder="상장사명, 종목코드, 고유번호" value="삼성전자" />
         <select id="years">
           <option value="8">8년</option>
           <option value="10" selected>10년</option>
@@ -2740,7 +2765,7 @@ INDEX_HTML = r"""<!doctype html>
       $("results").innerHTML = "";
       try {
         const rows = await getJson(`/api/search?q=${encodeURIComponent(q)}`);
-        $("status").textContent = `${rows.length}개 후보`;
+        $("status").textContent = `${rows.length}개 상장사 후보`;
         $("results").innerHTML = rows.map(row => `<button class="company" data-code="${row.corp_code}" data-name="${row.corp_name}">
           <strong>${row.corp_name}</strong><span>고유번호 ${row.corp_code} · 종목코드 ${row.stock_code || "-"}</span>
         </button>`).join("") || "검색 결과가 없습니다.";
@@ -2797,6 +2822,8 @@ INDEX_HTML = r"""<!doctype html>
         <div class="event"><strong>${esc(event.headline)}</strong><br>${esc(event.message)}<br><small>신뢰도: ${esc(a.confidence)} · 최신 출처: ${esc(a.latest_source || "OpenDART")}</small></div>
         ${renderSalesStrategy(data)}
         ${renderCoverage(data)}
+        ${renderServiceContracts(data)}
+        ${renderExecutives(data)}
         <h2>감사인 이력</h2>
         <table><thead><tr><th>사업연도</th><th>감사인</th><th>의견</th><th>출처</th><th>보고서</th></tr></thead>
         <tbody>${(data.history || []).map(row => `<tr><td>${esc(row.bsns_year)}</td><td>${esc(row.adtor)}</td><td>${esc(row.adt_opinion || "-")}</td><td>${esc(row.source_detail || "-")}<small>${esc(row.source_note || "")}</small></td><td>${filingLink(row)}</td></tr>`).join("")}</tbody></table>
@@ -2898,6 +2925,36 @@ INDEX_HTML = r"""<!doctype html>
       </div>`;
     }
 
+    function renderServiceContracts(data) {
+      const rows = data.service_contracts || [];
+      if (!rows.length) return "";
+      return `<h2 style="margin-top:16px;">감사용역 보수·시간</h2>
+        <table><thead><tr><th>사업연도</th><th>감사인</th><th>계약보수</th><th>계약시간</th><th>실제보수</th><th>실제시간</th></tr></thead>
+        <tbody>${rows.slice(0, 8).map(row => `<tr>
+          <td>${esc(row.bsns_year)}</td>
+          <td>${esc(row.adtor || "-")}</td>
+          <td>${esc(row.adt_cntrct_dtls_mendng || row.mendng || "-")}</td>
+          <td>${esc(row.adt_cntrct_dtls_time || row.tot_reqre_time || "-")}</td>
+          <td>${esc(row.real_exc_dtls_mendng || "-")}</td>
+          <td>${esc(row.real_exc_dtls_time || "-")}</td>
+        </tr>`).join("")}</tbody></table>`;
+    }
+
+    function renderExecutives(data) {
+      const rows = data.executives || [];
+      if (!rows.length) return "";
+      return `<h2 style="margin-top:16px;">임원 및 선임 후보군</h2>
+        <table><thead><tr><th>성명</th><th>직위/담당</th><th>등기/상근</th><th>선임 관련 신호</th><th>주요경력</th><th>원문</th></tr></thead>
+        <tbody>${rows.slice(0, 12).map(row => `<tr>
+          <td>${esc(row.nm || "-")}</td>
+          <td>${esc(row.ofcps || "-")}<small>${esc(row.chrg_job || "")}</small></td>
+          <td>${esc([row.rgist_exctv_at, row.fte_at].filter(Boolean).join(" / ") || "-")}</td>
+          <td>${esc(row.decision_role_signal || "-")}</td>
+          <td>${esc(short(row.main_career || "-", 120))}</td>
+          <td>${filingLink(row)}</td>
+        </tr>`).join("")}</tbody></table>`;
+    }
+
     function renderSpecialIssues(data) {
       const issues = data.special_issues || [];
       if (!issues.length) return "";
@@ -2926,9 +2983,9 @@ INDEX_HTML = r"""<!doctype html>
     function esc(value) {
       return String(value == null ? "" : value).replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
     }
-    function short(value) {
+    function short(value, limit = 80) {
       const text = String(value || "").replace(/\s+/g, " ").trim();
-      return text.length > 80 ? text.slice(0, 79) + "…" : text;
+      return text.length > limit ? text.slice(0, limit - 1) + "…" : text;
     }
   </script>
 </body>

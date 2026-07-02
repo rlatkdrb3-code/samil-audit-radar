@@ -1,13 +1,13 @@
 {
-  "code": "erp_integrated_audit_firm",
-  "label": "ERP 연동 회계법인",
-  "positioning": "회계법인 ERP/CRM의 고객 관계, 산업 강점, 서비스 라인, 제한 신호를 OpenDART 공시와 결합해 감사영업 후보를 추천하는 샘플 컨텍스트",
-  "auditor_aliases": ["우리회계법인", "our audit firm"],
+  "code": "samil_pwc",
+  "label": "삼일PwC",
+  "positioning": "상장사 외부감사와 내부회계관리제도에서 시작해 Tax, Deals, 산업 전문 자문으로 확장하는 회계법인",
+  "auditor_aliases": ["삼일회계법인", "삼일PwC", "Samil PwC", "PricewaterhouseCoopers"],
   "strengths": [
     "외부감사 및 내부회계관리제도 감사",
-    "상장사·대형비상장·금융회사 감사 전환 리서치",
-    "세무 리스크, 딜, 실사, 가치평가 등 인접 서비스 연결",
-    "산업별 담당 파트너와 기존 CRM 관계를 활용한 컨택 우선순위화"
+    "상장사 감사인 교체·지정감사 종료 타이밍 리서치",
+    "세무 리스크, Deals, 실사, 가치평가 등 인접 서비스 연결",
+    "PwC 글로벌 네트워크와 산업별 전문 조직"
   ],
   "service_lines": [
     "외부감사 선임/전환 리서치",
@@ -17,60 +17,15 @@
     "산업 전문 자문"
   ],
   "preferred_leads": [
-    "감사인 교체 또는 자유선임 전환 타이밍이 가까운 회사",
-    "상장사, 대형비상장, 금융회사, 사업보고서 제출대상처럼 공시·통제 요구가 큰 회사",
-    "외부감사 최초 진입, 미제출·정정 등 회계 컴플라이언스 이슈가 보이는 회사",
-    "ERP/CRM상 기존 관계, warm introduction, 산업 포커스와 연결되는 감사 관계 후보"
+    "상장사 중 감사인 교체 또는 자유선임 전환 타이밍이 가까운 회사",
+    "감사보수·감사시간·매출추이 등 공개 데이터로 영업 논리를 만들 수 있는 회사",
+    "감사위원회·감사·사외이사 등 선임 의사결정 후보군을 공개자료로 확인할 수 있는 회사",
+    "삼일PwC의 Tax, Deals, 산업·글로벌 네트워크 자문으로 확장 가능한 감사 관계 후보"
   ],
   "industry_focus_keywords": ["금융", "바이오", "방산", "제조", "플랫폼"],
   "industry_focus_codes": ["21", "26", "30", "64", "65", "66"],
-  "firm_people": [
-    {
-      "person_ref": "partner_industry_01",
-      "role": "감사 파트너",
-      "industry_keywords": ["전자", "제조", "플랫폼"],
-      "industry_codes": ["26", "30"],
-      "domain_tags": ["상장사 감사", "내부회계관리제도", "글로벌 제조"],
-      "education_tags": ["A대 동문"],
-      "career_tags": ["제조업 CFO 네트워크"],
-      "network_tags": ["감사위원 네트워크"],
-      "audit_experience_years": 12
-    },
-    {
-      "person_ref": "manager_finance_01",
-      "role": "감사 매니저",
-      "industry_keywords": ["금융", "핀테크", "플랫폼"],
-      "industry_codes": ["64", "65", "66"],
-      "domain_tags": ["금융회사 감사", "내부통제", "IT 일반통제"],
-      "network_tags": ["금융권 실무자 네트워크"],
-      "audit_experience_years": 8
-    }
-  ],
-  "target_accounts": [
-    {
-      "corp_code": "00000000",
-      "corp_name": "샘플테크",
-      "industry_tags": ["플랫폼", "제조"],
-      "revenue_trend": "최근 3년 매출 성장",
-      "audit_fee_trend": "감사용역 보수 상승",
-      "decision_makers": [
-        {
-          "role": "감사위원장",
-          "education_tags": ["A대 동문"],
-          "career_tags": ["제조업 CFO 네트워크"],
-          "network_tags": ["감사위원 네트워크"]
-        }
-      ],
-      "relationship_edges": [
-        {
-          "firm_person_ref": "partner_industry_01",
-          "target_role": "감사위원장",
-          "basis": "동문·감사위원 네트워크",
-          "strength": "warm"
-        }
-      ]
-    }
-  ],
+  "firm_people": [],
+  "target_accounts": [],
   "erp_signals": {
     "relationship_tags": [],
     "restricted_corp_codes": [],
@@ -80,6 +35,6 @@
   "public_basis": [
     "OpenDART 공개 공시",
     "외부감사법상 감사인 선임·지정 제도",
-    "회계법인 ERP/CRM에 저장 가능한 고객 관계·산업·제한 신호의 샘플 스키마"
+    "삼일PwC 공개 서비스 영역과 상장사 정기보고서 주요정보"
   ]
 }

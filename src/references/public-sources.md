@@ -5,9 +5,9 @@ This plugin is grounded in public audit disclosure and auditor appointment rules
 ## Sample Firm Context
 
 - The public demo uses `src/examples/firm_context.sample.json`.
-  - This is synthetic ERP/CRM context for a hypothetical accounting firm, not a claim of access to any firm's internal data.
+  - This is a Samil PwC persona context built from public positioning assumptions, not a claim of access to Samil PwC's internal data.
   - The schema is designed to accept real firm-provided fields such as auditor aliases, service lines, industry focus, restricted accounts, priority accounts, warm-introduction signals, firm-side personnel expertise, target-company decision-maker role tags, and relationship edges.
-  - Education, career, and network examples in the sample are placeholder business tags and not real personal data.
+  - Education, career, and network fields are extension slots only. The public demo does not include real personal data or internal relationship data.
 - Publicly verifiable signals remain grounded in OpenDART filings and external-auditor appointment rules.
 
 ## OpenDART APIs
@@ -20,6 +20,9 @@ This plugin is grounded in public audit disclosure and auditor appointment rules
   - Provides auditor name, audit opinion, emphasis matters, key audit matters, and settlement date from periodic reports.
 - Audit service contract status API: https://opendart.fss.or.kr/guide/detail.do?apiGrpCd=DS002&apiId=2020010
   - Provides audit service contract fee/time and actual fee/time fields from periodic reports.
+- Executive status API: https://opendart.fss.or.kr/guide/detail.do?apiGrpCd=DS002&apiId=2019010
+  - Provides executive name, position, registered executive status, full-time status, duty, major career, maximum-shareholder relationship, tenure, and tenure-end fields from periodic reports.
+  - It does not provide a stable separate education field; education can only be treated as a text clue when a company includes it in major career text.
 - Non-audit service contract status API: https://opendart.fss.or.kr/guide/detail.do?apiGrpCd=DS002&apiId=2020011
   - Provides non-audit service contracts with the statutory auditor from periodic reports.
 - OpenDART disclosure search API: https://opendart.fss.or.kr/guide/detail.do?apiGrpCd=DS001&apiId=2019001
@@ -35,6 +38,7 @@ This plugin is grounded in public audit disclosure and auditor appointment rules
   - Explains the periodic designation system as six years of free appointment followed by three years of regulator-designated external audit for listed companies and similar entities.
 - External Audit Act Article 10, auditor appointment: https://www.law.go.kr/LSW/lsLawLinkInfo.do?chrClsCd=010202&lsId=001701&lsJoLnkSeq=900643588&print=print
   - Sets appointment deadlines and the rule that listed companies, large non-listed companies, and financial companies appoint the same auditor for three consecutive business years.
+  - It also distinguishes appointment bodies such as audit committee, statutory auditor with auditor-selection committee approval, and related governance rules depending on company type.
 - FSS/FSC annual guidance summarized by KDI: https://eiec.kdi.re.kr/policy/materialView.do?num=273968
   - Summarizes auditor appointment deadlines, reporting duties, and company-type differences.
 - External Audit Act Enforcement Decree, external audit scope: https://www.law.go.kr/lumLsLinkPop.do?chrClsCd=010202&lspttninfSeq=149542
