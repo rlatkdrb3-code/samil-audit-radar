@@ -846,14 +846,58 @@ def row_priority(row: dict[str, Any]) -> int:
 
 
 def fetch_service_contracts(corp_code: str, config: AppConfig, *, years: int) -> list[dict[str, Any]]:
-    contracts: list[dict[str, Any]] = []
+    contracts_by_year: dict[str, dict[str, Any]] = {}
     start_year = config.current_year - 1
     fetch_years = list(range(start_year, start_year - years, -1))
     for year, rows in fetch_yearly_payloads("adtServcCnclsSttus", corp_code, config, fetch_years):
-        for row in select_current_period_rows(rows):
-            contracts.append(normalize_disclosure_row(row, year))
+        for row in normalize_service_contract_rows(rows, year):
+            bsns_year = str(row.get("bsns_year", "")).strip()
+            if not bsns_year:
+                continue
+            existing = contracts_by_year.get(bsns_year)
+            if existing is None or service_contract_priority(row) > service_contract_priority(existing):
+                contracts_by_year[bsns_year] = row
+    contracts = list(contracts_by_year.values())
     contracts.sort(key=lambda row: int_or_zero(row.get("bsns_year")), reverse=True)
-    return contracts
+    return contracts[:years]
+
+
+def normalize_service_contract_rows(rows: list[dict[str, Any]], report_year: int) -> list[dict[str, Any]]:
+    valid = [row for row in rows if is_meaningful_value(row.get("adtor", ""))]
+    if not valid:
+        return []
+    term_numbers = [period_term_number(row.get("bsns_year", "")) for row in valid]
+    term_numbers = [number for number in term_numbers if number is not None]
+    max_term = max(term_numbers) if term_numbers else None
+    normalized = []
+    for row in valid:
+        term_number = period_term_number(row.get("bsns_year", ""))
+        inferred_year = report_year
+        if max_term is not None and term_number is not None:
+            inferred_year = report_year - (max_term - term_number)
+        if inferred_year > report_year or inferred_year < report_year - 3:
+            continue
+        item = normalize_disclosure_row(row, inferred_year)
+        item["source_report_year"] = str(report_year)
+        item["rcept_url"] = dart_viewer_url(item.get("rcept_no", ""))
+        normalized.append(item)
+    return normalized
+
+
+def period_term_number(value: Any) -> int | None:
+    match = re.search(r"제\s*([0-9]+)\s*기", str(value or ""))
+    return int(match.group(1)) if match else None
+
+
+def service_contract_priority(row: dict[str, Any]) -> int:
+    score = 0
+    if str(row.get("source_report_year", "")) == str(row.get("bsns_year", "")):
+        score += 4
+    if row.get("real_exc_dtls_mendng") or row.get("real_exc_dtls_time"):
+        score += 2
+    if row.get("rcept_no"):
+        score += 1
+    return score
 
 
 def fetch_executive_status(corp_code: str, config: AppConfig, *, years: int) -> list[dict[str, Any]]:
@@ -2394,7 +2438,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
                 "| "
                 + " | ".join(
                     [
-                        clean_md(row.get("bsns_year", "")),
+                        clean_md(contract_period_display(row)),
                         clean_md(row.get("adtor", "")),
                         clean_md(row.get("adt_cntrct_dtls_mendng") or row.get("mendng", "")),
                         clean_md(row.get("adt_cntrct_dtls_time") or row.get("tot_reqre_time", "")),
@@ -2417,6 +2461,14 @@ def render_markdown(payload: dict[str, Any]) -> str:
 
 def clean_md(value: Any) -> str:
     return str(value or "").replace("|", "\\|").replace("\n", " ").strip()
+
+
+def contract_period_display(row: dict[str, Any]) -> str:
+    year = str(row.get("bsns_year", "")).strip()
+    period = re.sub(r"\s+", " ", str(row.get("period_label", ""))).strip()
+    if period and period != year:
+        return f"{year} ({period})"
+    return year
 
 
 def markdown_filing_label(row: dict[str, Any]) -> str:
@@ -2931,7 +2983,7 @@ INDEX_HTML = r"""<!doctype html>
       return `<h2 style="margin-top:16px;">감사용역 보수·시간</h2>
         <table><thead><tr><th>사업연도</th><th>감사인</th><th>계약보수</th><th>계약시간</th><th>실제보수</th><th>실제시간</th></tr></thead>
         <tbody>${rows.slice(0, 8).map(row => `<tr>
-          <td>${esc(row.bsns_year)}</td>
+          <td>${esc(row.bsns_year)}<small>${esc(row.period_label || "")}</small></td>
           <td>${esc(row.adtor || "-")}</td>
           <td>${esc(row.adt_cntrct_dtls_mendng || row.mendng || "-")}</td>
           <td>${esc(row.adt_cntrct_dtls_time || row.tot_reqre_time || "-")}</td>
