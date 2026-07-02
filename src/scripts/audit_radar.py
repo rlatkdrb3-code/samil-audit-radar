@@ -40,7 +40,7 @@ REQUEST_LOGS: dict[str, list[float]] = {}
 RESPONSE_CACHE: dict[str, tuple[float, Any]] = {}
 SERVER_LOCK = threading.Lock()
 CORP_CLASS_LABELS = {
-    "Y": "유가증권시장",
+    "Y": "코스피(유가증권시장)",
     "K": "코스닥",
     "N": "코넥스",
     "E": "기타",
@@ -305,18 +305,41 @@ def fetch_audit_history(corp_code: str, config: AppConfig, *, years: int) -> lis
             config,
             {"corp_code": corp_code, "bsns_year": str(year), "reprt_code": REPORT_CODE_ANNUAL},
         )
-        for row in payload.get("list", []) or []:
-            bsns_year = str(row.get("bsns_year", "")).strip()
+        for row in select_current_period_rows(payload.get("list", []) or []):
             auditor = str(row.get("adtor", "")).strip()
-            if not bsns_year or not auditor:
+            if not auditor:
                 continue
+            item = normalize_disclosure_row(row, year)
+            bsns_year = item["bsns_year"]
             existing = rows_by_year.get(bsns_year)
-            if existing is None or row_priority(row) > row_priority(existing):
-                rows_by_year[bsns_year] = row
+            if existing is None or row_priority(item) > row_priority(existing):
+                rows_by_year[bsns_year] = item
 
     history = list(rows_by_year.values())
     history.sort(key=lambda row: int_or_zero(row.get("bsns_year")), reverse=True)
     return history[:years]
+
+
+def select_current_period_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    valid = [row for row in rows if str(row.get("adtor", "")).strip()]
+    current = [row for row in valid if is_current_period_row(row)]
+    if current:
+        return current
+    return valid[:1]
+
+
+def is_current_period_row(row: dict[str, Any]) -> bool:
+    label = re.sub(r"\s+", "", str(row.get("bsns_year", "")))
+    return "당기" in label
+
+
+def normalize_disclosure_row(row: dict[str, Any], business_year: int) -> dict[str, Any]:
+    item = dict(row)
+    period_label = str(item.get("bsns_year", "")).strip()
+    if period_label and period_label != str(business_year):
+        item["period_label"] = period_label
+    item["bsns_year"] = str(business_year)
+    return item
 
 
 def row_priority(row: dict[str, Any]) -> int:
@@ -342,8 +365,8 @@ def fetch_service_contracts(corp_code: str, config: AppConfig, *, years: int) ->
             )
         except RuntimeError:
             continue
-        for row in payload.get("list", []) or []:
-            contracts.append(row)
+        for row in select_current_period_rows(payload.get("list", []) or []):
+            contracts.append(normalize_disclosure_row(row, year))
     contracts.sort(key=lambda row: int_or_zero(row.get("bsns_year")), reverse=True)
     return contracts
 
@@ -439,7 +462,7 @@ def periodic_subject_estimate(corp: dict[str, str], corp_cls: str) -> dict[str, 
         return {
             "status": "likely_subject",
             "label": f"{CORP_CLASS_LABELS[corp_cls]} 상장회사",
-            "reason": "OpenDART 법인구분상 유가/코스닥 상장회사로 확인됩니다.",
+            "reason": "OpenDART 법인구분상 유가증권시장/코스닥 상장회사로 확인됩니다.",
         }
     if corp_cls == "N":
         return {
@@ -655,6 +678,9 @@ def shorten(value: Any, limit: int = 80) -> str:
 
 
 def int_or_zero(value: Any) -> int:
+    match = re.search(r"(?:19|20)\d{2}", str(value))
+    if match:
+        return int(match.group(0))
     try:
         return int(str(value))
     except (TypeError, ValueError):
@@ -843,6 +869,11 @@ INDEX_HTML = r"""<!doctype html>
     .metric span { display: block; color: var(--muted); font-size: 12px; }
     .metric strong { display: block; margin-top: 8px; font-size: 18px; line-height: 1.25; }
     .event { border-left: 4px solid var(--accent); padding: 12px 14px; background: #eefaf7; margin-bottom: 14px; border-radius: 4px; }
+    .report-meta { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 14px; }
+    .report-meta span { display: block; color: var(--muted); font-size: 12px; }
+    .report-meta strong { display: block; font-size: 18px; margin-top: 2px; }
+    .badge { border: 1px solid var(--line); border-radius: 999px; padding: 6px 10px; font-size: 12px; font-weight: 700; color: var(--accent); background: #eefaf7; white-space: nowrap; }
+    .badge.demo { color: #8a4b00; background: #fff7ed; border-color: #fed7aa; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th, td { border-bottom: 1px solid var(--line); padding: 9px 8px; text-align: left; vertical-align: top; }
     th { color: var(--muted); font-weight: 700; background: #fbfcfe; }
@@ -928,12 +959,14 @@ INDEX_HTML = r"""<!doctype html>
 
     function renderReport(data) {
       const a = data.analysis || {};
+      const meta = reportMeta(data);
       if (a.status !== "ok") {
-        $("report").innerHTML = `<p>${a.message || "데이터 없음"}</p>`;
+        $("report").innerHTML = `${meta}<p>${a.message || "데이터 없음"}</p>`;
         return;
       }
       const event = a.estimated_event || {};
       $("report").innerHTML = `
+        ${meta}
         <div class="summary">
           <div class="metric"><span>현재 감사인</span><strong>${esc(a.current_auditor)}</strong></div>
           <div class="metric"><span>최신 사업연도</span><strong>${esc(a.latest_business_year)}</strong></div>
@@ -947,6 +980,17 @@ INDEX_HTML = r"""<!doctype html>
         <h2 style="margin-top:16px;">확인 필요</h2>
         <ul>${(a.follow_up || []).map(item => `<li>${esc(item)}</li>`).join("")}</ul>
       `;
+    }
+
+    function reportMeta(data) {
+      const company = data.company || {};
+      const source = String(data.source || "");
+      const isDemo = source.includes("Demo");
+      const label = isDemo ? "데모 데이터" : "OpenDART 실데이터";
+      return `<div class="report-meta">
+        <div><span>조회 대상</span><strong>${esc(company.corp_name || "-")}</strong></div>
+        <div class="badge ${isDemo ? "demo" : ""}">${label}</div>
+      </div>`;
     }
 
     function esc(value) {
