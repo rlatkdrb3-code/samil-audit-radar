@@ -2,6 +2,8 @@
 
 AX 해커톤 예선 제출용 Codex 플러그인입니다. 대상 기업은 삼일PwC이며, 공개 자료로 확인 가능한 문제인 `감사인 이력 파악과 주기적 지정/선임 이벤트 사전 모니터링`을 다룹니다.
 
+공개 데모: https://samil-audit-radar.onrender.com
+
 ## 문제 정의
 
 회계법인의 본질적 업무는 감사용역이며, 감사 고객의 선임/지정 주기 변화는 감사·세무·딜·리스크 자문 기회의 출발점이 됩니다. 하지만 기업별 감사인, 감사인 연속연차, 주기적 지정 가능 시점을 확인하려면 DART 공시와 외부감사 제도 기준을 함께 봐야 합니다.
@@ -58,6 +60,11 @@ python3 scripts/audit_radar.py demo
 ```
 
 ## 공개 배포
+
+현재 Render에 배포되어 있습니다.
+
+- Public URL: https://samil-audit-radar.onrender.com
+- Health check: https://samil-audit-radar.onrender.com/healthz
 
 GitHub Pages처럼 정적 호스팅만 제공하는 곳에는 실제 OpenDART 검색 기능을 안전하게 배포하기 어렵습니다. API 키가 브라우저에 노출될 수 있기 때문입니다. 이 프로젝트는 Python 서버가 `DART_API_KEY`를 서버 환경변수로 읽도록 되어 있으므로 Render, Railway, Fly.io, Cloud Run 같은 서버 실행형 플랫폼에 배포하는 방식을 권장합니다.
 

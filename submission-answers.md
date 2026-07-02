@@ -18,4 +18,4 @@ AI를 사용해 과제 요구사항을 해석하고, 삼일PwC의 본업과 Open
 
 ## 5. 어떻게 검증했나요?
 
-API 키 없이도 동작 확인이 가능한 데모 감사인 이력으로 연속연차와 지정감사 가능성 추정 로직을 검증합니다. OpenDART API 키를 설정한 환경에서는 실제 기업명을 검색해 감사인 이력 리포트가 생성되는지 확인합니다. 또한 plugin validator로 `src/.codex-plugin/plugin.json`과 스킬 구조가 Codex 플러그인 형식에 맞는지 검증합니다.
+API 키 없이도 동작 확인이 가능한 데모 감사인 이력으로 연속연차와 지정감사 가능성 추정 로직을 검증합니다. OpenDART API 키를 설정한 환경에서는 실제 기업명 검색이 동작하는지 확인했습니다. Render 공개 배포 URL(`https://samil-audit-radar.onrender.com`)에서 `/healthz`, `/api/status`, 삼성전자 검색 API 응답, 웹 UI 렌더링을 확인했습니다. 또한 plugin validator로 `src/.codex-plugin/plugin.json`과 스킬 구조가 Codex 플러그인 형식에 맞는지 검증합니다.
