@@ -13,6 +13,7 @@ import time
 import urllib.parse
 import urllib.request
 import zipfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from http import HTTPStatus
@@ -299,13 +300,14 @@ def build_report(
 def fetch_audit_history(corp_code: str, config: AppConfig, *, years: int) -> list[dict[str, Any]]:
     rows_by_year: dict[str, dict[str, Any]] = {}
     start_year = config.current_year - 1
-    for year in range(start_year, start_year - years - 2, -1):
-        payload = dart_get(
-            "accnutAdtorNmNdAdtOpinion",
-            config,
-            {"corp_code": corp_code, "bsns_year": str(year), "reprt_code": REPORT_CODE_ANNUAL},
-        )
-        for row in select_current_period_rows(payload.get("list", []) or []):
+    fetch_years = list(range(start_year, start_year - years - 2, -1))
+    for year, rows in fetch_yearly_payloads(
+        "accnutAdtorNmNdAdtOpinion",
+        corp_code,
+        config,
+        fetch_years,
+    ):
+        for row in select_current_period_rows(rows):
             auditor = str(row.get("adtor", "")).strip()
             if not auditor:
                 continue
@@ -318,6 +320,40 @@ def fetch_audit_history(corp_code: str, config: AppConfig, *, years: int) -> lis
     history = list(rows_by_year.values())
     history.sort(key=lambda row: int_or_zero(row.get("bsns_year")), reverse=True)
     return history[:years]
+
+
+def fetch_yearly_payloads(
+    endpoint: str,
+    corp_code: str,
+    config: AppConfig,
+    years: list[int],
+) -> list[tuple[int, list[dict[str, Any]]]]:
+    if not years:
+        return []
+
+    def load_year(year: int) -> tuple[int, list[dict[str, Any]]]:
+        try:
+            payload = dart_get(
+                endpoint,
+                config,
+                {
+                    "corp_code": corp_code,
+                    "bsns_year": str(year),
+                    "reprt_code": REPORT_CODE_ANNUAL,
+                },
+            )
+        except RuntimeError:
+            return year, []
+        return year, payload.get("list", []) or []
+
+    max_workers = min(5, len(years))
+    results: list[tuple[int, list[dict[str, Any]]]] = []
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(load_year, year) for year in years]
+        for future in as_completed(futures):
+            results.append(future.result())
+    results.sort(key=lambda item: item[0], reverse=True)
+    return results
 
 
 def select_current_period_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -361,16 +397,9 @@ def row_priority(row: dict[str, Any]) -> int:
 def fetch_service_contracts(corp_code: str, config: AppConfig, *, years: int) -> list[dict[str, Any]]:
     contracts: list[dict[str, Any]] = []
     start_year = config.current_year - 1
-    for year in range(start_year, start_year - years, -1):
-        try:
-            payload = dart_get(
-                "adtServcCnclsSttus",
-                config,
-                {"corp_code": corp_code, "bsns_year": str(year), "reprt_code": REPORT_CODE_ANNUAL},
-            )
-        except RuntimeError:
-            continue
-        for row in select_current_period_rows(payload.get("list", []) or []):
+    fetch_years = list(range(start_year, start_year - years, -1))
+    for year, rows in fetch_yearly_payloads("adtServcCnclsSttus", corp_code, config, fetch_years):
+        for row in select_current_period_rows(rows):
             contracts.append(normalize_disclosure_row(row, year))
     contracts.sort(key=lambda row: int_or_zero(row.get("bsns_year")), reverse=True)
     return contracts
