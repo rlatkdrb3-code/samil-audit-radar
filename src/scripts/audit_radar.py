@@ -1265,37 +1265,45 @@ INDEX_HTML = r"""<!doctype html>
     :root {
       color-scheme: light;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      --ink: #1f2933;
-      --muted: #627386;
-      --line: #d7dee8;
+      --ink: #102033;
+      --muted: #5f728b;
+      --line: #cbd8ea;
       --panel: #ffffff;
-      --bg: #f5f7fb;
-      --brand: #d04a02;
-      --accent: #0f766e;
+      --bg: #f4f8ff;
+      --brand: #2563eb;
+      --brand-dark: #1d4ed8;
+      --brand-soft: #eaf2ff;
+      --accent: #0891b2;
+      --accent-soft: #e6f7fb;
+      --shadow: 0 14px 40px rgba(37, 99, 235, 0.09);
     }
     * { box-sizing: border-box; }
     body { margin: 0; background: var(--bg); color: var(--ink); }
-    header { background: #fff; border-bottom: 1px solid var(--line); padding: 18px 24px; }
-    main { max-width: 1180px; margin: 0 auto; padding: 22px; }
-    h1 { margin: 0; font-size: 22px; letter-spacing: 0; }
+    header { background: #0f3f88; color: #fff; border-bottom: 1px solid #0b3474; padding: 20px 28px; }
+    main { max-width: 1200px; margin: 0 auto; padding: 24px; }
+    h1 { margin: 0; font-size: 24px; letter-spacing: 0; }
     h2 { font-size: 16px; margin: 0 0 12px; }
-    .subtitle { margin-top: 4px; color: var(--muted); font-size: 13px; }
-    .toolbar { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; margin: 18px 0; }
-    input, select, button { font: inherit; height: 42px; border: 1px solid var(--line); border-radius: 6px; padding: 0 12px; background: #fff; }
+    .subtitle { margin-top: 5px; color: #bfdbfe; font-size: 13px; }
+    .toolbar { display: grid; grid-template-columns: 1fr 116px 92px; gap: 10px; margin: 0; }
+    input, select, button { font: inherit; height: 44px; border: 1px solid var(--line); border-radius: 6px; padding: 0 12px; background: #fff; color: var(--ink); }
+    input:focus, select:focus { outline: 2px solid rgba(37, 99, 235, 0.22); border-color: var(--brand); }
     button { background: var(--brand); color: #fff; border-color: var(--brand); cursor: pointer; font-weight: 700; }
-    button.secondary { background: #fff; color: var(--ink); border-color: var(--line); }
-    .grid { display: grid; grid-template-columns: 320px 1fr; gap: 16px; align-items: start; }
-    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px; }
-    .status { color: var(--muted); font-size: 13px; margin-top: 8px; min-height: 18px; }
-    .company { width: 100%; display: block; text-align: left; background: #fff; color: var(--ink); border: 1px solid var(--line); margin-bottom: 8px; height: auto; padding: 10px; border-radius: 6px; }
-    .company strong { display: block; }
+    button:hover { background: var(--brand-dark); border-color: var(--brand-dark); }
+    .grid { display: grid; grid-template-columns: 320px 1fr; gap: 18px; align-items: start; }
+    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 18px; box-shadow: var(--shadow); }
+    .search-panel { margin-bottom: 18px; }
+    .status { color: var(--muted); font-size: 13px; margin-top: 10px; min-height: 18px; }
+    .company { width: 100%; display: block; text-align: left; background: #fff; color: var(--ink); border: 1px solid var(--line); margin-bottom: 8px; height: auto; padding: 11px 12px; border-radius: 6px; }
+    .company:hover { border-color: var(--brand); background: var(--brand-soft); }
+    .company strong { display: block; color: #12345d; }
     .company span { color: var(--muted); font-size: 12px; }
     .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
-    .metric { border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #fbfcfe; min-height: 86px; }
+    .metric { border: 1px solid #cfe0f6; border-radius: 8px; padding: 12px; background: #f8fbff; min-height: 86px; }
     .metric span { display: block; color: var(--muted); font-size: 12px; }
     .metric strong { display: block; margin-top: 8px; font-size: 18px; line-height: 1.25; }
-    .event { border-left: 4px solid var(--accent); padding: 12px 14px; background: #eefaf7; margin-bottom: 14px; border-radius: 4px; }
-    .coverage { border: 1px solid var(--line); background: #fbfcfe; border-radius: 8px; padding: 12px; margin-bottom: 14px; }
+    .event { border-left: 4px solid var(--brand); padding: 12px 14px; background: var(--brand-soft); margin-bottom: 14px; border-radius: 4px; }
+    .event small { color: #46617f; }
+    .coverage { border: 1px solid #cfe0f6; background: #f8fbff; border-radius: 8px; padding: 12px; margin-bottom: 14px; }
     .coverage-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 8px; }
     .coverage-grid div { border: 1px solid var(--line); border-radius: 6px; padding: 8px; background: #fff; }
     .coverage-grid span { display: block; color: var(--muted); font-size: 11px; }
@@ -1303,13 +1311,13 @@ INDEX_HTML = r"""<!doctype html>
     .report-meta { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 14px; }
     .report-meta span { display: block; color: var(--muted); font-size: 12px; }
     .report-meta strong { display: block; font-size: 18px; margin-top: 2px; }
-    .badge { border: 1px solid var(--line); border-radius: 999px; padding: 6px 10px; font-size: 12px; font-weight: 700; color: var(--accent); background: #eefaf7; white-space: nowrap; }
-    .badge.demo { color: #8a4b00; background: #fff7ed; border-color: #fed7aa; }
+    .badge { border: 1px solid #b9d5ff; border-radius: 999px; padding: 6px 10px; font-size: 12px; font-weight: 700; color: var(--brand-dark); background: var(--brand-soft); white-space: nowrap; }
+    .badge.demo { color: #0e7490; background: var(--accent-soft); border-color: #a5e3ee; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th, td { border-bottom: 1px solid var(--line); padding: 9px 8px; text-align: left; vertical-align: top; }
-    th { color: var(--muted); font-weight: 700; background: #fbfcfe; }
+    th { color: #4b6380; font-weight: 700; background: #f2f7ff; }
     td small { color: var(--muted); display: block; margin-top: 3px; line-height: 1.35; }
-    a { color: var(--accent); font-weight: 700; text-decoration: none; }
+    a { color: var(--brand-dark); font-weight: 700; text-decoration: none; }
     ul { margin: 8px 0 0 18px; padding: 0; }
     li { margin: 5px 0; }
     @media (max-width: 860px) {
@@ -1324,7 +1332,7 @@ INDEX_HTML = r"""<!doctype html>
     <div class="subtitle">OpenDART 기반 감사인 연속연차 및 다음 지정/선임 이벤트 추정</div>
   </header>
   <main>
-    <section class="panel">
+    <section class="panel search-panel">
       <div class="toolbar">
         <input id="query" placeholder="기업명, 종목코드, 고유번호" value="삼성전자" />
         <select id="years">
@@ -1334,7 +1342,6 @@ INDEX_HTML = r"""<!doctype html>
         </select>
         <button id="searchBtn">검색</button>
       </div>
-      <button class="secondary" id="demoBtn">데모 보기</button>
       <div class="status" id="status"></div>
     </section>
     <div class="grid" style="margin-top:16px;">
@@ -1351,7 +1358,6 @@ INDEX_HTML = r"""<!doctype html>
   <script>
     const $ = (id) => document.getElementById(id);
     $("searchBtn").addEventListener("click", search);
-    $("demoBtn").addEventListener("click", async () => renderReport(await getJson("/api/demo")));
     $("query").addEventListener("keydown", (event) => { if (event.key === "Enter") search(); });
 
     async function getJson(url) {
@@ -1462,7 +1468,7 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function esc(value) {
-      return String(value || "").replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+      return String(value == null ? "" : value).replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
     }
     function short(value) {
       const text = String(value || "").replace(/\s+/g, " ").trim();
