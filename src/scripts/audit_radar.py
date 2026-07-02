@@ -321,11 +321,16 @@ def fetch_audit_history(corp_code: str, config: AppConfig, *, years: int) -> lis
 
 
 def select_current_period_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    valid = [row for row in rows if str(row.get("adtor", "")).strip()]
+    valid = [row for row in rows if is_meaningful_value(row.get("adtor", ""))]
     current = [row for row in valid if is_current_period_row(row)]
     if current:
         return current
     return valid[:1]
+
+
+def is_meaningful_value(value: Any) -> bool:
+    text = re.sub(r"\s+", "", str(value or ""))
+    return bool(text) and text not in {"-", "해당사항없음", "해당없음", "없음"}
 
 
 def is_current_period_row(row: dict[str, Any]) -> bool:
