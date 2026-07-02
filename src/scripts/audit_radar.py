@@ -25,6 +25,7 @@ from xml.etree import ElementTree
 
 
 BASE_URL = "https://opendart.fss.or.kr/api"
+DART_VIEWER_URL = "https://dart.fss.or.kr/dsaf001/main.do"
 REPORT_CODE_ANNUAL = "11011"
 DEFAULT_YEARS = 10
 MIN_YEARS = 4
@@ -59,6 +60,14 @@ BIG4_ALIASES = {
     "ernstyoung": "한영",
     "한영": "한영",
 }
+SPECIAL_ISSUE_KEYWORDS = (
+    "감사전재무제표미제출",
+    "미제출",
+    "지연",
+    "제출기한",
+    "연장",
+    "정정",
+)
 
 
 @dataclass
@@ -280,18 +289,47 @@ def build_report(
         return build_demo_report()
     years = clamp_years(years)
     corp = resolve_company(company[:80], config, corp_code=corp_code)
-    audit_history = fetch_audit_history(corp["corp_code"], config, years=years)
+    structured_history = fetch_audit_history(corp["corp_code"], config, years=years)
+    disclosure_bundle = fetch_external_audit_disclosures(corp["corp_code"], config, years=years)
+    audit_history = merge_audit_sources(
+        structured_history,
+        disclosure_bundle["history"],
+        years=years,
+    )
     service_history = fetch_service_contracts(corp["corp_code"], config, years=min(years, 5))
     analysis = analyze_history(corp, audit_history, config.current_year)
+    if disclosure_bundle["special_issues"] and analysis.get("status") == "ok":
+        analysis.setdefault("follow_up", []).insert(
+            0,
+            "감사보고서 미제출·지연·연장·정정 등 특이공시 원문 확인",
+        )
+    coverage = build_coverage_summary(
+        audit_history,
+        structured_history,
+        disclosure_bundle["history"],
+        disclosure_bundle["special_issues"],
+        years=years,
+        current_year=config.current_year,
+        external_error=disclosure_bundle.get("error"),
+    )
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "source": "OpenDART public API",
+        "source": "OpenDART public API (periodic reports + external-audit disclosures)",
         "company": corp,
         "history": audit_history,
+        "history_sources": {
+            "periodic_report_api": structured_history,
+            "external_audit_reports": disclosure_bundle["history"],
+        },
+        "audit_disclosures": disclosure_bundle["filings"],
+        "special_issues": disclosure_bundle["special_issues"],
+        "coverage": coverage,
         "service_contracts": service_history,
         "analysis": analysis,
         "disclaimers": [
             "Public DART data does not directly label free appointment, periodic designation, split designation, deferral, or all private-company eligibility facts.",
+            "External-audit disclosure rows use DART filing-list metadata and should be checked against the original audit report when used for outreach or acceptance decisions.",
+            "Missing-year notes mean the plugin did not find a matching public filing in the searched window; they are not proof of legal non-submission.",
             "The timing result is an estimate for research and follow-up planning, not a legal or audit acceptance conclusion.",
         ],
     }
@@ -312,6 +350,9 @@ def fetch_audit_history(corp_code: str, config: AppConfig, *, years: int) -> lis
             if not auditor:
                 continue
             item = normalize_disclosure_row(row, year)
+            item["source_kind"] = "periodic_report_api"
+            item["source_detail"] = "정기보고서 주요정보 API"
+            item["rcept_url"] = dart_viewer_url(item.get("rcept_no", ""))
             bsns_year = item["bsns_year"]
             existing = rows_by_year.get(bsns_year)
             if existing is None or row_priority(item) > row_priority(existing):
@@ -320,6 +361,258 @@ def fetch_audit_history(corp_code: str, config: AppConfig, *, years: int) -> lis
     history = list(rows_by_year.values())
     history.sort(key=lambda row: int_or_zero(row.get("bsns_year")), reverse=True)
     return history[:years]
+
+
+def fetch_external_audit_disclosures(
+    corp_code: str,
+    config: AppConfig,
+    *,
+    years: int,
+) -> dict[str, Any]:
+    start_year = max(1999, config.current_year - years - 1)
+    start_date = f"{start_year}0101"
+    end_date = date.today().strftime("%Y%m%d")
+    try:
+        filings = dart_list_filings(
+            corp_code,
+            config,
+            bgn_de=start_date,
+            end_de=end_date,
+            pblntf_ty="F",
+        )
+    except RuntimeError as exc:
+        return {"history": [], "filings": [], "special_issues": [], "error": str(exc)}
+
+    normalized_filings = [normalize_filing_row(row) for row in filings]
+    history_by_year: dict[str, dict[str, Any]] = {}
+    special_issues: list[dict[str, Any]] = []
+
+    for filing in normalized_filings:
+        issue = classify_special_issue(filing)
+        if issue:
+            special_issues.append(issue)
+
+        if not is_external_audit_report_filing(filing):
+            continue
+        history_row = filing_to_history_row(filing)
+        if not history_row:
+            continue
+        year = history_row["bsns_year"]
+        existing = history_by_year.get(year)
+        if existing is None or filing_history_priority(history_row) > filing_history_priority(existing):
+            history_by_year[year] = history_row
+
+    history = list(history_by_year.values())
+    history.sort(key=lambda row: int_or_zero(row.get("bsns_year")), reverse=True)
+    special_issues.sort(key=lambda row: row.get("rcept_dt", ""), reverse=True)
+    return {
+        "history": history[:years],
+        "filings": normalized_filings,
+        "special_issues": special_issues[:20],
+        "error": None,
+    }
+
+
+def dart_list_filings(
+    corp_code: str,
+    config: AppConfig,
+    *,
+    bgn_de: str,
+    end_de: str,
+    pblntf_ty: str,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    page_no = 1
+    while True:
+        payload = dart_get(
+            "list",
+            config,
+            {
+                "corp_code": corp_code,
+                "bgn_de": bgn_de,
+                "end_de": end_de,
+                "pblntf_ty": pblntf_ty,
+                "page_no": str(page_no),
+                "page_count": "100",
+                "sort": "date",
+                "sort_mth": "desc",
+            },
+        )
+        page_rows = payload.get("list", []) or []
+        rows.extend(page_rows)
+        total_page = int_or_zero(payload.get("total_page")) or 1
+        if page_no >= total_page or not page_rows:
+            break
+        page_no += 1
+    return rows
+
+
+def normalize_filing_row(row: dict[str, Any]) -> dict[str, Any]:
+    rcept_no = str(row.get("rcept_no", "")).strip()
+    report_nm = str(row.get("report_nm", "")).strip()
+    period = extract_report_period(report_nm)
+    return {
+        "corp_cls": str(row.get("corp_cls", "")).strip(),
+        "corp_code": str(row.get("corp_code", "")).strip(),
+        "corp_name": str(row.get("corp_name", "")).strip(),
+        "report_nm": report_nm,
+        "flr_nm": str(row.get("flr_nm", "")).strip(),
+        "rcept_no": rcept_no,
+        "rcept_dt": str(row.get("rcept_dt", "")).strip(),
+        "rcept_url": dart_viewer_url(rcept_no),
+        "rm": str(row.get("rm", "")).strip(),
+        "period_year": period.get("year", ""),
+        "period_month": period.get("month", ""),
+    }
+
+
+def extract_report_period(report_name: str) -> dict[str, str]:
+    patterns = [
+        r"\((20\d{2})[.\-/년\s]*(0[1-9]|1[0-2])?\)",
+        r"(20\d{2})[.\-/](0[1-9]|1[0-2])",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, report_name)
+        if match:
+            return {"year": match.group(1), "month": match.group(2) or ""}
+    return {"year": "", "month": ""}
+
+
+def is_external_audit_report_filing(filing: dict[str, Any]) -> bool:
+    report_name = re.sub(r"\s+", "", filing.get("report_nm", ""))
+    if "감사보고서" not in report_name:
+        return False
+    excluded = ("회계법인사업보고서", "감사전재무제표", "제출기한연장")
+    return not any(keyword in report_name for keyword in excluded)
+
+
+def filing_to_history_row(filing: dict[str, Any]) -> dict[str, Any] | None:
+    auditor = filing.get("flr_nm", "").strip()
+    if not is_meaningful_value(auditor):
+        return None
+    business_year = filing.get("period_year") or infer_business_year_from_receipt(
+        filing.get("rcept_dt", "")
+    )
+    if not business_year:
+        return None
+    return {
+        "bsns_year": business_year,
+        "adtor": auditor,
+        "adt_opinion": "",
+        "corp_cls": filing.get("corp_cls", ""),
+        "corp_code": filing.get("corp_code", ""),
+        "corp_name": filing.get("corp_name", ""),
+        "report_nm": filing.get("report_nm", ""),
+        "rcept_no": filing.get("rcept_no", ""),
+        "rcept_dt": filing.get("rcept_dt", ""),
+        "rcept_url": filing.get("rcept_url", ""),
+        "period_label": report_period_label(filing),
+        "source_kind": "external_audit_report",
+        "source_detail": "외부감사관련 감사보고서 공시목록",
+        "source_note": "감사인은 공시목록 제출인 기준이며 감사의견은 원문 확인이 필요합니다.",
+    }
+
+
+def infer_business_year_from_receipt(rcept_dt: str) -> str:
+    match = re.match(r"(20\d{2})(\d{2})(\d{2})", rcept_dt or "")
+    if not match:
+        return ""
+    filing_year = int(match.group(1))
+    filing_month = int(match.group(2))
+    return str(filing_year - 1 if filing_month <= 6 else filing_year)
+
+
+def report_period_label(filing: dict[str, Any]) -> str:
+    year = filing.get("period_year", "")
+    month = filing.get("period_month", "")
+    if year and month:
+        return f"{year}.{month}"
+    return year
+
+
+def filing_history_priority(row: dict[str, Any]) -> tuple[int, int, int]:
+    report_name = row.get("report_nm", "")
+    is_revision = int("정정" in report_name)
+    is_standalone = int("연결감사보고서" not in report_name)
+    receipt_date = digits_int(row.get("rcept_dt"))
+    return is_revision, is_standalone, receipt_date
+
+
+def classify_special_issue(filing: dict[str, Any]) -> dict[str, Any] | None:
+    report_name = filing.get("report_nm", "")
+    compact = re.sub(r"\s+", "", report_name)
+    labels = []
+    if "감사전재무제표미제출" in compact:
+        labels.append("감사전 재무제표 미제출")
+    if any(keyword in compact for keyword in ("지연", "제출기한", "연장")):
+        labels.append("제출 지연/기한 연장")
+    if "정정" in compact:
+        labels.append("정정 공시")
+    if not labels and not any(keyword in compact for keyword in SPECIAL_ISSUE_KEYWORDS):
+        return None
+    issue = dict(filing)
+    issue["issue_type"] = ", ".join(labels or ["특이 키워드 포함"])
+    return issue
+
+
+def merge_audit_sources(
+    structured_history: list[dict[str, Any]],
+    external_history: list[dict[str, Any]],
+    *,
+    years: int,
+) -> list[dict[str, Any]]:
+    rows_by_year: dict[str, dict[str, Any]] = {}
+    for row in external_history:
+        year = str(row.get("bsns_year", "")).strip()
+        if year:
+            rows_by_year[year] = dict(row)
+    for row in structured_history:
+        year = str(row.get("bsns_year", "")).strip()
+        if year:
+            rows_by_year[year] = dict(row)
+
+    merged = list(rows_by_year.values())
+    merged.sort(key=lambda row: int_or_zero(row.get("bsns_year")), reverse=True)
+    return merged[:years]
+
+
+def build_coverage_summary(
+    history: list[dict[str, Any]],
+    structured_history: list[dict[str, Any]],
+    external_history: list[dict[str, Any]],
+    special_issues: list[dict[str, Any]],
+    *,
+    years: int,
+    current_year: int,
+    external_error: str | None,
+) -> dict[str, Any]:
+    history_years = {str(row.get("bsns_year", "")).strip() for row in history}
+    recent_years = [str(year) for year in range(current_year - 1, current_year - min(years, 4), -1)]
+    missing_recent_years = [year for year in recent_years if year not in history_years]
+    notes = [
+        "정기보고서 주요정보 API를 우선 사용하고, 누락 연도는 외부감사관련 감사보고서 공시목록으로 보완합니다."
+    ]
+    if missing_recent_years:
+        notes.append(
+            "최근 연도 중 감사인 이력이 확인되지 않은 연도는 미제출, 제출 지연, 비대상, 명칭 불일치 가능성을 구분해 원문 확인이 필요합니다."
+        )
+    if external_error:
+        notes.append(f"외부감사관련 공시검색 보조 조회 실패: {external_error}")
+    return {
+        "merged_rows": len(history),
+        "periodic_report_api_rows": len(structured_history),
+        "external_audit_report_rows": len(external_history),
+        "special_issue_rows": len(special_issues),
+        "missing_recent_years": missing_recent_years,
+        "notes": notes,
+    }
+
+
+def dart_viewer_url(rcept_no: Any) -> str:
+    receipt = str(rcept_no or "").strip()
+    if not receipt:
+        return ""
+    return f"{DART_VIEWER_URL}?{urllib.parse.urlencode({'rcpNo': receipt})}"
 
 
 def fetch_yearly_payloads(
@@ -411,7 +704,7 @@ def analyze_history(corp: dict[str, str], history: list[dict[str, Any]], current
             "status": "no_data",
             "confidence": "low",
             "current_auditor": None,
-            "message": "최근 사업보고서에서 감사인 이력을 찾지 못했습니다.",
+            "message": "최근 사업보고서 및 외부감사관련 공시에서 감사인 이력을 찾지 못했습니다.",
             "follow_up": ["회사명/고유번호가 맞는지 확인", "DART 감사보고서 원문에서 수동 확인"],
         }
 
@@ -430,6 +723,8 @@ def analyze_history(corp: dict[str, str], history: list[dict[str, Any]], current
         "corp_class_label": CORP_CLASS_LABELS.get(latest.get("corp_cls") or corp.get("corp_cls", ""), "알 수 없음"),
         "current_auditor": latest["adtor"],
         "current_auditor_key": latest["auditor_key"],
+        "latest_source": latest.get("source_detail", "OpenDART"),
+        "latest_source_note": latest.get("source_note", ""),
         "latest_business_year": latest["bsns_year"],
         "consecutive_years": latest_run["length"],
         "current_run": latest_run,
@@ -590,6 +885,12 @@ def build_follow_up(subject: dict[str, str], event: dict[str, Any]) -> list[str]
 def build_demo_report() -> dict[str, Any]:
     demo_path = ROOT / "examples" / "sample_audit_history.json"
     payload = json.loads(demo_path.read_text(encoding="utf-8"))
+    history = []
+    for row in payload["history"]:
+        item = dict(row)
+        item.setdefault("source_kind", "demo_fixture")
+        item.setdefault("source_detail", "데모 데이터")
+        history.append(item)
     corp = {
         "corp_code": payload["corp_code"],
         "corp_name": payload["corp_name"],
@@ -597,12 +898,28 @@ def build_demo_report() -> dict[str, Any]:
         "modify_date": "",
         "corp_cls": payload["corp_cls"],
     }
-    analysis = analyze_history(corp, payload["history"], date.today().year)
+    analysis = analyze_history(corp, history, date.today().year)
+    coverage = build_coverage_summary(
+        history,
+        history,
+        [],
+        [],
+        years=len(history),
+        current_year=date.today().year,
+        external_error=None,
+    )
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "source": "Demo fixture",
         "company": corp,
-        "history": payload["history"],
+        "history": history,
+        "history_sources": {
+            "periodic_report_api": history,
+            "external_audit_reports": [],
+        },
+        "audit_disclosures": [],
+        "special_issues": [],
+        "coverage": coverage,
         "service_contracts": [],
         "analysis": analysis,
         "disclaimers": ["Demo data only."],
@@ -650,13 +967,44 @@ def render_markdown(payload: dict[str, Any]) -> str:
                 f"- 최신 사업연도: **{analysis['latest_business_year']}**",
                 f"- 동일 감사인 연속연차: **{analysis['consecutive_years']}년**",
                 f"- 법인구분: **{analysis['corp_class_label']}**",
+                f"- 최신 감사인 출처: **{analysis.get('latest_source', '')}**",
                 f"- 예상 이벤트: **{event.get('headline', '')}**",
                 f"- 신뢰도: **{analysis['confidence']}**",
                 f"- 해석: {event.get('message', '')}",
             ]
         )
-    lines.extend(["", "## 감사인 이력", "", "| 사업연도 | 감사인 | 감사의견 | 강조사항 | 핵심감사사항 |", "| --- | --- | --- | --- | --- |"])
+        if analysis.get("latest_source_note"):
+            lines.append(f"- 출처 메모: {analysis['latest_source_note']}")
+
+    coverage = payload.get("coverage", {})
+    if coverage:
+        lines.extend(
+            [
+                "",
+                "## 공시 커버리지",
+                "",
+                f"- 병합 이력 행: {coverage.get('merged_rows', 0)}건",
+                f"- 정기보고서 API 행: {coverage.get('periodic_report_api_rows', 0)}건",
+                f"- 외부감사 감사보고서 공시 행: {coverage.get('external_audit_report_rows', 0)}건",
+                f"- 특이공시 행: {coverage.get('special_issue_rows', 0)}건",
+            ]
+        )
+        if coverage.get("missing_recent_years"):
+            lines.append(f"- 최근 공시 미확인 연도: {', '.join(coverage['missing_recent_years'])}")
+        for note in coverage.get("notes", []):
+            lines.append(f"- {note}")
+
+    lines.extend(
+        [
+            "",
+            "## 감사인 이력",
+            "",
+            "| 사업연도 | 감사인 | 감사의견 | 출처 | 보고서/접수번호 |",
+            "| --- | --- | --- | --- | --- |",
+        ]
+    )
     for row in payload.get("history", []):
+        report_link = markdown_filing_label(row)
         lines.append(
             "| "
             + " | ".join(
@@ -664,12 +1012,41 @@ def render_markdown(payload: dict[str, Any]) -> str:
                     clean_md(row.get("bsns_year", "")),
                     clean_md(row.get("adtor", "")),
                     clean_md(row.get("adt_opinion", "")),
-                    clean_md(shorten(row.get("emphs_matter", ""))),
-                    clean_md(shorten(row.get("core_adt_matter", ""))),
+                    clean_md(row.get("source_detail", "")),
+                    clean_md(report_link),
                 ]
             )
             + " |"
         )
+
+    issues = payload.get("special_issues", [])
+    if issues:
+        lines.extend(
+            [
+                "",
+                "## 특이사항 공시",
+                "",
+                "| 접수일 | 유형 | 보고서명 | 제출인 | 원문 |",
+                "| --- | --- | --- | --- | --- |",
+            ]
+        )
+        for issue in issues:
+            link = issue.get("rcept_no", "")
+            if issue.get("rcept_url"):
+                link = f"[{issue.get('rcept_no', '')}]({issue.get('rcept_url', '')})"
+            lines.append(
+                "| "
+                + " | ".join(
+                    [
+                        clean_md(issue.get("rcept_dt", "")),
+                        clean_md(issue.get("issue_type", "")),
+                        clean_md(issue.get("report_nm", "")),
+                        clean_md(issue.get("flr_nm", "")),
+                        clean_md(link),
+                    ]
+                )
+                + " |"
+            )
 
     contracts = payload.get("service_contracts", [])
     if contracts:
@@ -704,6 +1081,16 @@ def clean_md(value: Any) -> str:
     return str(value or "").replace("|", "\\|").replace("\n", " ").strip()
 
 
+def markdown_filing_label(row: dict[str, Any]) -> str:
+    label = str(row.get("report_nm") or row.get("rcept_no") or "").strip()
+    receipt = str(row.get("rcept_no") or "").strip()
+    url = str(row.get("rcept_url") or "").strip()
+    if url and receipt:
+        link = f"[{receipt}]({url})"
+        return f"{label} {link}".strip()
+    return label
+
+
 def shorten(value: Any, limit: int = 80) -> str:
     text = re.sub(r"\s+", " ", str(value or "")).strip()
     if len(text) <= limit:
@@ -719,6 +1106,11 @@ def int_or_zero(value: Any) -> int:
         return int(str(value))
     except (TypeError, ValueError):
         return 0
+
+
+def digits_int(value: Any) -> int:
+    digits = re.sub(r"[^0-9]", "", str(value or ""))
+    return int(digits) if digits else 0
 
 
 def run_server(host: str, port: int, config: AppConfig) -> None:
@@ -903,6 +1295,11 @@ INDEX_HTML = r"""<!doctype html>
     .metric span { display: block; color: var(--muted); font-size: 12px; }
     .metric strong { display: block; margin-top: 8px; font-size: 18px; line-height: 1.25; }
     .event { border-left: 4px solid var(--accent); padding: 12px 14px; background: #eefaf7; margin-bottom: 14px; border-radius: 4px; }
+    .coverage { border: 1px solid var(--line); background: #fbfcfe; border-radius: 8px; padding: 12px; margin-bottom: 14px; }
+    .coverage-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 8px; }
+    .coverage-grid div { border: 1px solid var(--line); border-radius: 6px; padding: 8px; background: #fff; }
+    .coverage-grid span { display: block; color: var(--muted); font-size: 11px; }
+    .coverage-grid strong { display: block; margin-top: 4px; font-size: 15px; }
     .report-meta { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 14px; }
     .report-meta span { display: block; color: var(--muted); font-size: 12px; }
     .report-meta strong { display: block; font-size: 18px; margin-top: 2px; }
@@ -911,10 +1308,12 @@ INDEX_HTML = r"""<!doctype html>
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th, td { border-bottom: 1px solid var(--line); padding: 9px 8px; text-align: left; vertical-align: top; }
     th { color: var(--muted); font-weight: 700; background: #fbfcfe; }
+    td small { color: var(--muted); display: block; margin-top: 3px; line-height: 1.35; }
+    a { color: var(--accent); font-weight: 700; text-decoration: none; }
     ul { margin: 8px 0 0 18px; padding: 0; }
     li { margin: 5px 0; }
     @media (max-width: 860px) {
-      .toolbar, .grid, .summary { grid-template-columns: 1fr; }
+      .toolbar, .grid, .summary, .coverage-grid { grid-template-columns: 1fr; }
       main { padding: 14px; }
     }
   </style>
@@ -1007,13 +1406,48 @@ INDEX_HTML = r"""<!doctype html>
           <div class="metric"><span>연속연차</span><strong>${a.consecutive_years}년</strong></div>
           <div class="metric"><span>법인구분</span><strong>${esc(a.corp_class_label)}</strong></div>
         </div>
-        <div class="event"><strong>${esc(event.headline)}</strong><br>${esc(event.message)}<br><small>신뢰도: ${esc(a.confidence)}</small></div>
+        <div class="event"><strong>${esc(event.headline)}</strong><br>${esc(event.message)}<br><small>신뢰도: ${esc(a.confidence)} · 최신 출처: ${esc(a.latest_source || "OpenDART")}</small></div>
+        ${renderCoverage(data)}
         <h2>감사인 이력</h2>
-        <table><thead><tr><th>사업연도</th><th>감사인</th><th>의견</th><th>핵심감사사항</th></tr></thead>
-        <tbody>${(data.history || []).map(row => `<tr><td>${esc(row.bsns_year)}</td><td>${esc(row.adtor)}</td><td>${esc(row.adt_opinion)}</td><td>${esc(short(row.core_adt_matter))}</td></tr>`).join("")}</tbody></table>
+        <table><thead><tr><th>사업연도</th><th>감사인</th><th>의견</th><th>출처</th><th>보고서</th></tr></thead>
+        <tbody>${(data.history || []).map(row => `<tr><td>${esc(row.bsns_year)}</td><td>${esc(row.adtor)}</td><td>${esc(row.adt_opinion || "-")}</td><td>${esc(row.source_detail || "-")}<small>${esc(row.source_note || "")}</small></td><td>${filingLink(row)}</td></tr>`).join("")}</tbody></table>
+        ${renderSpecialIssues(data)}
         <h2 style="margin-top:16px;">확인 필요</h2>
         <ul>${(a.follow_up || []).map(item => `<li>${esc(item)}</li>`).join("")}</ul>
       `;
+    }
+
+    function renderCoverage(data) {
+      const c = data.coverage || {};
+      if (!Object.keys(c).length) return "";
+      const missing = (c.missing_recent_years || []).length
+        ? `<p><strong>최근 공시 미확인 연도:</strong> ${esc(c.missing_recent_years.join(", "))}</p>`
+        : "";
+      const notes = (c.notes || []).map(note => `<li>${esc(note)}</li>`).join("");
+      return `<div class="coverage">
+        <div class="coverage-grid">
+          <div><span>병합 이력</span><strong>${esc(c.merged_rows || 0)}건</strong></div>
+          <div><span>정기보고서 API</span><strong>${esc(c.periodic_report_api_rows || 0)}건</strong></div>
+          <div><span>외부감사 공시</span><strong>${esc(c.external_audit_report_rows || 0)}건</strong></div>
+          <div><span>특이공시</span><strong>${esc(c.special_issue_rows || 0)}건</strong></div>
+        </div>
+        ${missing}
+        ${notes ? `<ul>${notes}</ul>` : ""}
+      </div>`;
+    }
+
+    function renderSpecialIssues(data) {
+      const issues = data.special_issues || [];
+      if (!issues.length) return "";
+      return `<h2 style="margin-top:16px;">특이사항 공시</h2>
+        <table><thead><tr><th>접수일</th><th>유형</th><th>보고서명</th><th>제출인</th><th>원문</th></tr></thead>
+        <tbody>${issues.map(row => `<tr><td>${esc(row.rcept_dt)}</td><td>${esc(row.issue_type)}</td><td>${esc(row.report_nm)}</td><td>${esc(row.flr_nm)}</td><td>${filingLink(row)}</td></tr>`).join("")}</tbody></table>`;
+    }
+
+    function filingLink(row) {
+      const report = row.report_nm || row.rcept_no || "-";
+      if (!row.rcept_url) return esc(report);
+      return `<a href="${esc(row.rcept_url)}" target="_blank" rel="noreferrer">${esc(report)}</a>`;
     }
 
     function reportMeta(data) {

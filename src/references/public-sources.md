@@ -21,6 +21,12 @@ This plugin is grounded in public audit disclosure and auditor appointment rules
   - Provides audit service contract fee/time and actual fee/time fields from periodic reports.
 - Non-audit service contract status API: https://opendart.fss.or.kr/guide/detail.do?apiGrpCd=DS002&apiId=2020011
   - Provides non-audit service contracts with the statutory auditor from periodic reports.
+- OpenDART disclosure search API: https://opendart.fss.or.kr/guide/detail.do?apiGrpCd=DS001&apiId=2019001
+  - Supports `pblntf_ty=F` for external-audit-related filings, including audit reports, consolidated audit reports, combined audit reports, accounting-firm business reports, and pre-audit financial statement non-submission notices.
+- DART company-by-company search: https://dart.fss.or.kr/dsab001/main.do
+  - Public DART search exposes `외부감사관련` categories such as `감사보고서`, `연결감사보고서`, `결합감사보고서`, and `감사전재무제표미제출신고서`.
+- External Audit Act Enforcement Decree, audit report submission and public inspection: https://www.law.go.kr/LSW/lumLsLinkPop.do?lspttninfSeq=149589
+  - Requires submitted audit reports to be made available for public inspection on internet websites for the statutory period.
 
 ## Periodic Designation and Appointment Rules
 
@@ -30,4 +36,3 @@ This plugin is grounded in public audit disclosure and auditor appointment rules
   - Summarizes auditor appointment deadlines, reporting duties, and company-type differences.
 - External Audit Act Enforcement Decree, external audit scope: https://www.law.go.kr/lumLsLinkPop.do?chrClsCd=010202&lspttninfSeq=149542
   - Defines external audit target thresholds for companies, including asset, revenue, liability, employee, and member thresholds.
-
