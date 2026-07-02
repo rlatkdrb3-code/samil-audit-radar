@@ -32,7 +32,11 @@ This plugin is grounded in public audit disclosure and auditor appointment rules
 
 - FSC press release on periodic designation: https://www.fsc.go.kr/no010101/84372
   - Explains the periodic designation system as six years of free appointment followed by three years of regulator-designated external audit for listed companies and similar entities.
+- External Audit Act Article 10, auditor appointment: https://www.law.go.kr/LSW/lsLawLinkInfo.do?chrClsCd=010202&lsId=001701&lsJoLnkSeq=900643588&print=print
+  - Sets appointment deadlines and the rule that listed companies, large non-listed companies, and financial companies appoint the same auditor for three consecutive business years.
 - FSS/FSC annual guidance summarized by KDI: https://eiec.kdi.re.kr/policy/materialView.do?num=273968
   - Summarizes auditor appointment deadlines, reporting duties, and company-type differences.
 - External Audit Act Enforcement Decree, external audit scope: https://www.law.go.kr/lumLsLinkPop.do?chrClsCd=010202&lspttninfSeq=149542
   - Defines external audit target thresholds for companies, including asset, revenue, liability, employee, and member thresholds.
+- External Audit Act Enforcement Decree, large non-listed company: https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=286317
+  - Defines the large non-listed company asset threshold, including the separate threshold for business-report filers and public-disclosure-group companies.

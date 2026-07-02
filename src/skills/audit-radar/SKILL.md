@@ -11,6 +11,15 @@ The core question is narrow:
 
 > Which auditor is matched to this company, how long has that auditor served, and what audit appointment or periodic designation event may be coming next?
 
+Also classify the company into a sales-research case when possible:
+
+- listed company
+- large private company or business-report filer candidate
+- private external-audit subject found through audit-report filings
+- financial company candidate
+- limited company candidate
+- external-audit threshold candidate requiring financial-statement checks
+
 ## Data Sources
 
 Use public information only:
@@ -54,6 +63,8 @@ Lower-confidence statements:
 
 - Whether the current auditor is a freely appointed auditor or a designated auditor.
 - Whether a private company is a large non-listed company subject to periodic designation.
+- Whether a financial-company or limited-company signal from name/industry code fully determines the legal appointment rule.
+- Whether assets, revenue, liabilities, employees, or member-count thresholds are satisfied.
 - Exact FSS notification timing for a specific company.
 - Whether a missing public filing is a legal non-submission, delayed submission, non-subject year, or naming/API mismatch.
 
@@ -66,6 +77,7 @@ Lead with:
 - current auditor
 - consecutive tenure
 - estimated next event
+- sales case segment and recommended next action
 - confidence level
 - why the conclusion is limited
 
