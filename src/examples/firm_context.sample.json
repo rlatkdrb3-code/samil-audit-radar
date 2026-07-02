@@ -24,6 +24,53 @@
   ],
   "industry_focus_keywords": ["금융", "바이오", "방산", "제조", "플랫폼"],
   "industry_focus_codes": ["21", "26", "30", "64", "65", "66"],
+  "firm_people": [
+    {
+      "person_ref": "partner_industry_01",
+      "role": "감사 파트너",
+      "industry_keywords": ["전자", "제조", "플랫폼"],
+      "industry_codes": ["26", "30"],
+      "domain_tags": ["상장사 감사", "내부회계관리제도", "글로벌 제조"],
+      "education_tags": ["A대 동문"],
+      "career_tags": ["제조업 CFO 네트워크"],
+      "network_tags": ["감사위원 네트워크"],
+      "audit_experience_years": 12
+    },
+    {
+      "person_ref": "manager_finance_01",
+      "role": "감사 매니저",
+      "industry_keywords": ["금융", "핀테크", "플랫폼"],
+      "industry_codes": ["64", "65", "66"],
+      "domain_tags": ["금융회사 감사", "내부통제", "IT 일반통제"],
+      "network_tags": ["금융권 실무자 네트워크"],
+      "audit_experience_years": 8
+    }
+  ],
+  "target_accounts": [
+    {
+      "corp_code": "00000000",
+      "corp_name": "샘플테크",
+      "industry_tags": ["플랫폼", "제조"],
+      "revenue_trend": "최근 3년 매출 성장",
+      "audit_fee_trend": "감사용역 보수 상승",
+      "decision_makers": [
+        {
+          "role": "감사위원장",
+          "education_tags": ["A대 동문"],
+          "career_tags": ["제조업 CFO 네트워크"],
+          "network_tags": ["감사위원 네트워크"]
+        }
+      ],
+      "relationship_edges": [
+        {
+          "firm_person_ref": "partner_industry_01",
+          "target_role": "감사위원장",
+          "basis": "동문·감사위원 네트워크",
+          "strength": "warm"
+        }
+      ]
+    }
+  ],
   "erp_signals": {
     "relationship_tags": [],
     "restricted_corp_codes": [],

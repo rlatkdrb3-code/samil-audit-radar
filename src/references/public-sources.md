@@ -6,7 +6,8 @@ This plugin is grounded in public audit disclosure and auditor appointment rules
 
 - The public demo uses `src/examples/firm_context.sample.json`.
   - This is synthetic ERP/CRM context for a hypothetical accounting firm, not a claim of access to any firm's internal data.
-  - The schema is designed to accept real firm-provided fields such as auditor aliases, service lines, industry focus, restricted accounts, priority accounts, and warm-introduction signals.
+  - The schema is designed to accept real firm-provided fields such as auditor aliases, service lines, industry focus, restricted accounts, priority accounts, warm-introduction signals, firm-side personnel expertise, target-company decision-maker role tags, and relationship edges.
+  - Education, career, and network examples in the sample are placeholder business tags and not real personal data.
 - Publicly verifiable signals remain grounded in OpenDART filings and external-auditor appointment rules.
 
 ## OpenDART APIs

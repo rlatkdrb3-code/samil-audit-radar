@@ -26,6 +26,7 @@ Use the sample ERP/CRM firm context by default:
 - expansion into tax, deals, internal control, industry, and advisory work where independence permits
 - preference for companies with near-term auditor-change timing, strong disclosure/regulatory needs, or verifiable external-audit filings
 - optional ERP/CRM signals such as priority accounts, restricted accounts, warm introductions, service lines, and industry focus
+- optional personnel and relationship signals such as firm-side industry audit experience, domain knowledge, target-company decision-maker roles, education/career/network tags, revenue trend, and audit-fee trend
 
 ## Data Sources
 
@@ -37,7 +38,7 @@ Use public information only:
 - OpenDART disclosure search for `외부감사관련` audit reports, including `감사보고서`, `연결감사보고서`, and `감사전재무제표미제출신고서`.
 - Public FSC/FSS guidance on external auditor appointment and periodic designation.
 
-Do not claim access to any real firm's internal CRM, independence, audit acceptance, or client systems unless the user explicitly provides that data in the workspace. The public demo uses only OpenDART plus `src/examples/firm_context.sample.json`.
+Do not claim access to any real firm's internal CRM, independence, audit acceptance, or client systems unless the user explicitly provides that data in the workspace. The public demo uses only OpenDART plus `src/examples/firm_context.sample.json`. Treat personal information, education, career, and network data as user-provided or lawfully/publicly available business tags; do not infer or expose raw personal details.
 
 ## Commands
 
@@ -76,6 +77,7 @@ Lower-confidence statements:
 - Exact FSS notification timing for a specific company.
 - Whether a missing public filing is a legal non-submission, delayed submission, non-subject year, or naming/API mismatch.
 - Whether a firm-context recommendation would pass independence, conflict, quality-control, or internal acceptance review.
+- Whether personal relationship tags are lawful, current, complete, or appropriate for outreach without separate internal review.
 
 ## Output Style
 

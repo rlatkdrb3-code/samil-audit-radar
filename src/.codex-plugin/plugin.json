@@ -1,7 +1,7 @@
 {
   "name": "audit-lead-radar",
   "version": "0.1.0",
-  "description": "Recommend Korean audit-sales target companies by combining OpenDART auditor signals with a firm's ERP/CRM context.",
+  "description": "Recommend Korean audit-sales target companies by combining OpenDART auditor signals with firm-side personnel, relationship, and ERP/CRM context.",
   "author": {
     "name": "AX Hackathon Participant"
   },
@@ -9,7 +9,7 @@
   "interface": {
     "displayName": "Audit Lead Radar",
     "shortDescription": "Recommend audit-sales targets from OpenDART and firm context.",
-    "longDescription": "A Codex plugin for ERP/CRM-integrated audit lead research. It uses OpenDART public disclosures to identify a company's current auditor, recent auditor history, consecutive auditor tenure, likely periodic designation or free-appointment timing, and sales-fit signals for a configured accounting firm context.",
+    "longDescription": "A Codex plugin for ERP/CRM-integrated audit lead research. It uses OpenDART public disclosures to identify a company's current auditor, recent auditor history, consecutive auditor tenure, likely periodic designation or free-appointment timing, and sales-fit signals from configured firm personnel, industry expertise, relationship coverage, and target-account context.",
     "developerName": "AX Hackathon Participant",
     "category": "Productivity",
     "capabilities": ["Read", "Write"],

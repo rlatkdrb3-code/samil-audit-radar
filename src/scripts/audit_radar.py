@@ -115,6 +115,44 @@ DEFAULT_FIRM_CONTEXT = {
     ],
     "industry_focus_keywords": ["금융", "바이오", "방산", "제조", "플랫폼"],
     "industry_focus_codes": ["21", "26", "30", "64", "65", "66"],
+    "firm_people": [
+        {
+            "person_ref": "partner_industry_01",
+            "role": "감사 파트너",
+            "industry_keywords": ["전자", "제조", "플랫폼"],
+            "industry_codes": ["26", "30"],
+            "domain_tags": ["상장사 감사", "내부회계관리제도", "글로벌 제조"],
+            "education_tags": ["A대 동문"],
+            "career_tags": ["제조업 CFO 네트워크"],
+            "network_tags": ["감사위원 네트워크"],
+            "audit_experience_years": 12,
+        }
+    ],
+    "target_accounts": [
+        {
+            "corp_code": "00000000",
+            "corp_name": "샘플테크",
+            "industry_tags": ["플랫폼", "제조"],
+            "revenue_trend": "최근 3년 매출 성장",
+            "audit_fee_trend": "감사용역 보수 상승",
+            "decision_makers": [
+                {
+                    "role": "감사위원장",
+                    "education_tags": ["A대 동문"],
+                    "career_tags": ["제조업 CFO 네트워크"],
+                    "network_tags": ["감사위원 네트워크"],
+                }
+            ],
+            "relationship_edges": [
+                {
+                    "firm_person_ref": "partner_industry_01",
+                    "target_role": "감사위원장",
+                    "basis": "동문·감사위원 네트워크",
+                    "strength": "warm",
+                }
+            ],
+        }
+    ],
     "erp_signals": {
         "relationship_tags": [],
         "restricted_corp_codes": [],
@@ -1437,6 +1475,14 @@ def build_lead_recommendation(
     context_points, context_evidence = lead_context_points(persona, corp)
     drivers.append({"label": "ERP/CRM 맥락", "points": context_points, "evidence": context_evidence})
 
+    people_points, people_evidence = lead_people_network_points(
+        persona,
+        corp,
+        company_profile,
+        service_contracts,
+    )
+    drivers.append({"label": "인력·관계 커버리지", "points": people_points, "evidence": people_evidence})
+
     friction_points, friction_evidence = lead_friction_points(is_current_firm, firm_label, special_issues, sales_case)
     drivers.append({"label": "제약 조정", "points": friction_points, "evidence": friction_evidence})
 
@@ -1592,6 +1638,161 @@ def lead_context_points(persona: dict[str, Any], corp: dict[str, str]) -> tuple[
         points += min(6, len(relationship_tags) * 2)
         reasons.append("내부 관계 태그 존재")
     return max(-30, min(points, 18)), " · ".join(reasons) or "내부 ERP/CRM 신호 없음"
+
+
+def lead_people_network_points(
+    persona: dict[str, Any],
+    corp: dict[str, str],
+    company_profile: dict[str, Any],
+    service_contracts: list[dict[str, Any]],
+) -> tuple[int, str]:
+    target_context = target_account_context(persona, corp)
+    matched_people = matching_firm_people(persona, corp, company_profile, target_context)
+    decision_makers = as_dict_list(target_context.get("decision_makers")) if target_context else []
+    relationship_edges = as_dict_list(target_context.get("relationship_edges")) if target_context else []
+
+    points = 0
+    reasons = []
+    if matched_people:
+        points += min(8, 4 + len(matched_people) * 2)
+        roles = sorted({str(person.get("role", "")).strip() for person in matched_people if str(person.get("role", "")).strip()})
+        role_text = ", ".join(roles[:3]) if roles else f"{len(matched_people)}명"
+        reasons.append(f"해당 업종 감사·도메인 인력 매칭: {role_text}")
+
+    if decision_makers:
+        points += min(5, 2 + len(decision_makers))
+        roles = sorted({str(item.get("role", "")).strip() for item in decision_makers if str(item.get("role", "")).strip()})
+        role_text = ", ".join(roles[:3]) if roles else f"{len(decision_makers)}건"
+        reasons.append(f"감사인 선임 의사결정권자 role/tag 확보: {role_text}")
+
+    if relationship_edges:
+        warm_count = sum(1 for edge in relationship_edges if str(edge.get("strength", "")).lower() in {"warm", "strong"})
+        points += 6 if warm_count else 3
+        reasons.append(f"내부 네트워크 연결선 {len(relationship_edges)}건")
+
+    overlap_count = people_decision_overlap_count(matched_people, decision_makers)
+    if overlap_count:
+        points += min(4, overlap_count)
+        reasons.append(f"학력·이력·네트워크 태그 교집합 {overlap_count}개")
+
+    if target_context:
+        if str(target_context.get("revenue_trend", "")).strip():
+            points += 2
+            reasons.append("매출추이 컨텍스트 존재")
+        if str(target_context.get("audit_fee_trend", "")).strip():
+            points += 2
+            reasons.append("감사지출비용 추이 컨텍스트 존재")
+
+    fee_summary = service_fee_summary(service_contracts)
+    if fee_summary:
+        points += 2
+        reasons.append(fee_summary)
+
+    if not reasons:
+        return 0, "인력·의사결정권자·업종경험·네트워크 데이터 미제공"
+    return min(points, 14), " · ".join(reasons)
+
+
+def target_account_context(persona: dict[str, Any], corp: dict[str, str]) -> dict[str, Any]:
+    for item in as_dict_list(persona.get("target_accounts")):
+        if matches_corp_signal([item], corp):
+            return item
+    return {}
+
+
+def matching_firm_people(
+    persona: dict[str, Any],
+    corp: dict[str, str],
+    company_profile: dict[str, Any],
+    target_context: dict[str, Any],
+) -> list[dict[str, Any]]:
+    company_tags = company_context_tags(corp, company_profile, target_context)
+    industry_code = str(company_profile.get("induty_code") or corp.get("induty_code") or "").strip()
+    company_name = normalize_search(corp.get("corp_name", ""))
+    matches = []
+    for person in as_dict_list(persona.get("firm_people")):
+        score = 0
+        for keyword in as_text_list(person.get("industry_keywords")):
+            normalized = normalize_search(keyword)
+            if normalized and (
+                normalized in company_name
+                or normalized in company_tags
+                or any(normalized in tag or tag in normalized for tag in company_tags)
+            ):
+                score += 2
+        for prefix in as_text_list(person.get("industry_codes")):
+            if industry_code and industry_code.startswith(prefix):
+                score += 2
+        person_tags = set(normalize_tag_list(person.get("domain_tags")))
+        if tag_sets_overlap(person_tags, company_tags):
+            score += 2
+        if int_or_zero(person.get("audit_experience_years")) >= 5:
+            score += 1
+        if score:
+            item = dict(person)
+            item["_match_score"] = score
+            matches.append(item)
+    matches.sort(key=lambda item: -int_or_zero(item.get("_match_score")))
+    return matches[:5]
+
+
+def company_context_tags(
+    corp: dict[str, str],
+    company_profile: dict[str, Any],
+    target_context: dict[str, Any],
+) -> set[str]:
+    tags = set(normalize_tag_list(target_context.get("industry_tags")))
+    tags.update(normalize_tag_list(target_context.get("company_tags")))
+    tags.update(normalize_tag_list(company_profile.get("induty_code")))
+    tags.update(normalize_tag_list(corp.get("corp_name")))
+    return tags
+
+
+def people_decision_overlap_count(
+    matched_people: list[dict[str, Any]],
+    decision_makers: list[dict[str, Any]],
+) -> int:
+    overlap = set()
+    for person in matched_people:
+        person_tags = person_profile_tags(person)
+        for decision_maker in decision_makers:
+            overlap.update(person_tags & person_profile_tags(decision_maker))
+    return len(overlap)
+
+
+def person_profile_tags(item: dict[str, Any]) -> set[str]:
+    tags = set()
+    for key in ("education_tags", "career_tags", "network_tags", "domain_tags"):
+        tags.update(normalize_tag_list(item.get(key)))
+    return tags
+
+
+def tag_sets_overlap(left: set[str], right: set[str]) -> bool:
+    if left & right:
+        return True
+    return any(a and b and (a in b or b in a) for a in left for b in right)
+
+
+def normalize_tag_list(value: Any) -> list[str]:
+    return [normalize_search(item) for item in as_text_list(value) if normalize_search(item)]
+
+
+def as_dict_list(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
+def service_fee_summary(service_contracts: list[dict[str, Any]]) -> str:
+    if not service_contracts:
+        return ""
+    years = sorted(
+        {str(item.get("bsns_year", "")).strip() for item in service_contracts if str(item.get("bsns_year", "")).strip()},
+        reverse=True,
+    )
+    if len(years) >= 2:
+        return f"OpenDART 감사용역 보수·시간 {len(years)}개년 추이 확인 가능"
+    return "OpenDART 감사용역 보수·시간 확인 가능"
 
 
 def firm_focus_reasons(
@@ -1768,6 +1969,7 @@ def build_recommendation_next_steps(
     else:
         steps.append("현 감사인 선임 사유가 자유선임인지 지정인지 원문 공시로 확인")
         steps.append("ERP/CRM에서 기존 관계, 제한 계정, 담당 파트너, 산업 담당 조직 매칭 여부 확인")
+        steps.append("감사인 선임 의사결정권자와 내부 인력 간 합법 보유 관계 신호를 확인")
     steps.append(sales_case.get("next_action", "감사인 선임보고 및 원문 공시 확인"))
     if segment.get("code") in {"large_private_or_business_report_filer_candidate", "audit_threshold_candidate"}:
         steps.append("자산·매출·부채·종업원 수와 사업보고서 제출대상 여부 확인")
@@ -1787,6 +1989,7 @@ def build_recommendation_caveats(
     caveats = [
         "추천 점수는 공개 공시와 설정된 firm context 기반의 영업 리서치 신호입니다.",
         "감사 수임 가능성은 독립성, 이해상충, 품질관리, 내부 승인 절차를 통과해야 판단할 수 있습니다.",
+        "개인 인적사항·학력·이력·네트워크 정보는 합법적으로 보유했거나 공개·동의된 범위의 업무 관련 태그로만 사용해야 합니다.",
     ]
     if is_current_firm:
         caveats.append(f"현재 감사인이 {firm_label}이면 신규 감사영업이 아니라 유지·부가자문 관점으로 해석해야 합니다.")
