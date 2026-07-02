@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""OpenDART-based external auditor tenure and periodic designation radar."""
+"""OpenDART-based audit lead recommendation radar."""
 
 from __future__ import annotations
 
@@ -39,6 +39,11 @@ PROJECT_ROOT = ROOT.parent
 CACHE_DIR = PROJECT_ROOT / ".cache"
 CORP_CACHE = CACHE_DIR / "corp_codes.json"
 ENV_FILES = (PROJECT_ROOT / ".env.local", PROJECT_ROOT / ".env")
+FIRM_CONTEXT_ENV = "AUDIT_FIRM_CONTEXT"
+FIRM_CONTEXT_CANDIDATES = (
+    PROJECT_ROOT / "firm_context.local.json",
+    ROOT / "examples" / "firm_context.sample.json",
+)
 REQUEST_LOGS: dict[str, list[float]] = {}
 RESPONSE_CACHE: dict[str, tuple[float, Any]] = {}
 SERVER_LOCK = threading.Lock()
@@ -84,32 +89,45 @@ FINANCIAL_NAME_KEYWORDS = (
     "생명보험",
 )
 LIMITED_COMPANY_KEYWORDS = ("유한회사", "유한책임회사", "(유)", "（유）")
-DEFAULT_FIRM_PERSONA = "samil_pwc"
-FIRM_PERSONAS = {
-    "samil_pwc": {
-        "code": "samil_pwc",
-        "label": "삼일PwC",
-        "positioning": "감사 기반 신뢰관계에서 Tax, Deals, 산업·글로벌 네트워크 자문으로 확장하는 회계법인",
-        "strengths": [
-            "외부감사 및 내부회계관리제도 감사",
-            "국내외 세무 리스크와 조세 기회 검토",
-            "M&A, 실사, 가치평가, 구조조정 등 Deals 자문",
-            "PwC 글로벌 네트워크와 산업별 전문 조직",
-        ],
-        "preferred_leads": [
-            "감사인 교체 또는 자유선임 전환 타이밍이 가까운 회사",
-            "상장사, 대형비상장, 금융회사, 사업보고서 제출대상처럼 공시·통제 요구가 큰 회사",
-            "외부감사 최초 진입, 미제출·정정 등 회계 컴플라이언스 이슈가 보이는 회사",
-            "세무·딜·글로벌 확장 자문으로 연결될 수 있는 감사 관계 후보",
-        ],
-        "public_basis": [
-            "삼일PwC 재무제표 감사 서비스",
-            "삼일PwC Tax Services",
-            "삼일PwC Deals",
-            "삼일PwC 산업센터 및 PwC 글로벌 네트워크",
-        ],
-    }
+DEFAULT_FIRM_CONTEXT = {
+    "code": "erp_integrated_audit_firm",
+    "label": "ERP 연동 회계법인",
+    "positioning": "회계법인 ERP/CRM의 고객 관계, 산업 강점, 서비스 라인, 제한 신호를 OpenDART 공시와 결합해 감사영업 후보를 추천하는 샘플 컨텍스트",
+    "auditor_aliases": ["우리회계법인", "our audit firm"],
+    "strengths": [
+        "외부감사 및 내부회계관리제도 감사",
+        "상장사·대형비상장·금융회사 감사 전환 리서치",
+        "세무 리스크, 딜, 실사, 가치평가 등 인접 서비스 연결",
+        "산업별 담당 파트너와 기존 CRM 관계를 활용한 컨택 우선순위화",
+    ],
+    "service_lines": [
+        "외부감사 선임/전환 리서치",
+        "내부회계관리제도 및 감사위원회 커뮤니케이션 점검",
+        "세무 리스크 진단",
+        "M&A·실사·가치평가 사전 스크리닝",
+        "산업 전문 자문",
+    ],
+    "preferred_leads": [
+        "감사인 교체 또는 자유선임 전환 타이밍이 가까운 회사",
+        "상장사, 대형비상장, 금융회사, 사업보고서 제출대상처럼 공시·통제 요구가 큰 회사",
+        "외부감사 최초 진입, 미제출·정정 등 회계 컴플라이언스 이슈가 보이는 회사",
+        "ERP/CRM상 기존 관계, warm introduction, 산업 포커스와 연결되는 감사 관계 후보",
+    ],
+    "industry_focus_keywords": ["금융", "바이오", "방산", "제조", "플랫폼"],
+    "industry_focus_codes": ["21", "26", "30", "64", "65", "66"],
+    "erp_signals": {
+        "relationship_tags": [],
+        "restricted_corp_codes": [],
+        "warm_intro_corp_codes": [],
+        "priority_accounts": [],
+    },
+    "public_basis": [
+        "OpenDART 공개 공시",
+        "외부감사법상 감사인 선임·지정 제도",
+        "회계법인 ERP/CRM에 저장 가능한 고객 관계·산업·제한 신호의 샘플 스키마",
+    ],
 }
+DEFAULT_FIRM_PERSONA = DEFAULT_FIRM_CONTEXT["code"]
 
 
 @dataclass
@@ -120,7 +138,7 @@ class AppConfig:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Samil Audit Radar")
+    parser = argparse.ArgumentParser(description="Audit Lead Radar")
     sub = parser.add_subparsers(dest="command", required=True)
 
     search = sub.add_parser("search", help="Search OpenDART corporation codes")
@@ -136,7 +154,7 @@ def main() -> int:
     report.add_argument("--format", choices=("markdown", "json"), default="markdown")
     report.add_argument("--demo", action="store_true")
 
-    recommend = sub.add_parser("recommend", help="Rank audit sales targets for a firm persona")
+    recommend = sub.add_parser("recommend", help="Rank audit sales targets for a firm context")
     recommend.add_argument("query", help="Company keyword, stock code, or corp_code")
     recommend.add_argument("--years", type=int, default=DEFAULT_YEARS)
     recommend.add_argument("--limit", type=int, default=MAX_RECOMMENDATIONS)
@@ -414,7 +432,7 @@ def build_report(
         disclosure_bundle["special_issues"],
         company_profile,
     )
-    firm_persona = get_firm_persona(DEFAULT_FIRM_PERSONA)
+    firm_persona = get_firm_persona()
     lead_recommendation = build_lead_recommendation(
         firm_persona,
         corp,
@@ -429,7 +447,7 @@ def build_report(
     analysis["lead_recommendation"] = lead_recommendation
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "source": "OpenDART public API (periodic reports + external-audit disclosures)",
+        "source": "OpenDART public API + local firm context",
         "firm_persona": firm_persona,
         "company": corp,
         "company_profile": company_profile,
@@ -447,7 +465,7 @@ def build_report(
         "lead_recommendation": lead_recommendation,
         "disclaimers": [
             "Public DART data does not directly label free appointment, periodic designation, split designation, deferral, or all private-company eligibility facts.",
-            "Recommendations are persona-based sales research signals, not audit acceptance, independence, conflict, or quality-control decisions.",
+            "Recommendations combine public filing signals with the configured firm context; they are not audit acceptance, independence, conflict, or quality-control decisions.",
             "Sales case segmentation uses public filing signals only; large private-company, financial-company, limited-company, and external-audit threshold status must be confirmed against source documents.",
             "External-audit disclosure rows use DART filing-list metadata and should be checked against the original audit report when used for outreach or acceptance decisions.",
             "Missing-year notes mean the plugin did not find a matching public filing in the searched window; they are not proof of legal non-submission.",
@@ -1318,8 +1336,64 @@ def priority_label(priority: str) -> str:
     }.get(priority, "우선순위 확인")
 
 
-def get_firm_persona(code: str = DEFAULT_FIRM_PERSONA) -> dict[str, Any]:
-    return dict(FIRM_PERSONAS.get(code, FIRM_PERSONAS[DEFAULT_FIRM_PERSONA]))
+def get_firm_persona(code: str | None = None) -> dict[str, Any]:
+    context = deep_copy(DEFAULT_FIRM_CONTEXT)
+    path = firm_context_path()
+    if path:
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                deep_merge(context, loaded)
+                context["_context_source"] = str(path)
+        except (OSError, json.JSONDecodeError) as exc:
+            context["_context_warning"] = f"{path}: {exc}"
+    else:
+        context["_context_source"] = "built-in default"
+    if code and code != context.get("code"):
+        context["_requested_context"] = code
+    return context
+
+
+def firm_context_path() -> Path | None:
+    configured = os.environ.get(FIRM_CONTEXT_ENV, "").strip()
+    if configured:
+        return Path(configured).expanduser()
+    for candidate in FIRM_CONTEXT_CANDIDATES:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def deep_copy(value: dict[str, Any]) -> dict[str, Any]:
+    return json.loads(json.dumps(value, ensure_ascii=False))
+
+
+def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    for key, value in override.items():
+        if value is None:
+            continue
+        if isinstance(value, dict) and isinstance(base.get(key), dict):
+            deep_merge(base[key], value)
+        else:
+            base[key] = value
+    return base
+
+
+def firm_auditor_keys(persona: dict[str, Any]) -> set[str]:
+    aliases = [persona.get("label", ""), persona.get("code", "")]
+    aliases.extend(as_text_list(persona.get("auditor_aliases", [])))
+    keys = {normalize_auditor(alias) for alias in aliases if str(alias).strip()}
+    return {key for key in keys if key}
+
+
+def as_text_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, tuple):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str) and value.strip():
+        return [value.strip()]
+    return []
 
 
 def build_lead_recommendation(
@@ -1337,30 +1411,41 @@ def build_lead_recommendation(
     flags = sales_strategy.get("flags", [])
     event = analysis.get("estimated_event", {}) or {}
     current_auditor_key = analysis.get("current_auditor_key") or ""
-    is_current_samil = current_auditor_key == "삼일"
+    firm_label = str(persona.get("label") or "회계법인")
+    is_current_firm = current_auditor_key in firm_auditor_keys(persona)
 
     drivers = []
     timing_points, timing_evidence = lead_timing_points(sales_case, event)
     drivers.append({"label": "타이밍", "points": timing_points, "evidence": timing_evidence})
 
     segment_points, segment_evidence = lead_segment_points(segment, flags)
-    drivers.append({"label": "삼일 적합도", "points": segment_points, "evidence": segment_evidence})
+    drivers.append({"label": "세그먼트 적합도", "points": segment_points, "evidence": segment_evidence})
 
     coverage_points, coverage_evidence = lead_coverage_points(coverage, special_issues)
     drivers.append({"label": "공개 검증성", "points": coverage_points, "evidence": coverage_evidence})
 
-    expansion_points, expansion_evidence = lead_expansion_points(segment, flags, service_contracts, company_profile)
+    expansion_points, expansion_evidence = lead_expansion_points(
+        persona,
+        corp,
+        segment,
+        flags,
+        service_contracts,
+        company_profile,
+    )
     drivers.append({"label": "부가자문 확장성", "points": expansion_points, "evidence": expansion_evidence})
 
-    friction_points, friction_evidence = lead_friction_points(is_current_samil, special_issues, sales_case)
+    context_points, context_evidence = lead_context_points(persona, corp)
+    drivers.append({"label": "ERP/CRM 맥락", "points": context_points, "evidence": context_evidence})
+
+    friction_points, friction_evidence = lead_friction_points(is_current_firm, firm_label, special_issues, sales_case)
     drivers.append({"label": "제약 조정", "points": friction_points, "evidence": friction_evidence})
 
     raw_score = sum(item["points"] for item in drivers)
     fit_score = max(0, min(100, raw_score))
     grade = recommendation_grade(fit_score)
-    target_type = "관계 유지·부가자문 리드" if is_current_samil else "신규 감사영업 후보"
+    target_type = "기존 관계 확장 리드" if is_current_firm else "신규 감사영업 후보"
     verdict = recommendation_verdict(fit_score, target_type, sales_case)
-    opening_angle = build_opening_angle(persona, sales_case, segment, flags, is_current_samil)
+    opening_angle = build_opening_angle(persona, sales_case, segment, flags, is_current_firm)
 
     return {
         "firm": {
@@ -1375,9 +1460,18 @@ def build_lead_recommendation(
         "opening_angle": opening_angle,
         "suggested_services": suggested_services_for_persona(persona, sales_case, segment, flags),
         "score_drivers": drivers,
-        "next_steps": build_recommendation_next_steps(sales_case, segment, flags, special_issues, is_current_samil),
-        "caveats": build_recommendation_caveats(is_current_samil, special_issues),
+        "next_steps": build_recommendation_next_steps(
+            persona,
+            sales_case,
+            segment,
+            flags,
+            special_issues,
+            is_current_firm,
+        ),
+        "caveats": build_recommendation_caveats(persona, is_current_firm, special_issues),
         "persona_basis": persona.get("public_basis", []),
+        "firm_context_basis": persona.get("public_basis", []),
+        "firm_context_source": persona.get("_context_source", ""),
     }
 
 
@@ -1445,6 +1539,8 @@ def lead_coverage_points(
 
 
 def lead_expansion_points(
+    persona: dict[str, Any],
+    corp: dict[str, str],
     segment: dict[str, Any],
     flags: list[dict[str, Any]],
     service_contracts: list[dict[str, Any]],
@@ -1469,19 +1565,108 @@ def lead_expansion_points(
     if str(company_profile.get("hm_url", "")).strip():
         points += 1
         reasons.append("회사 프로필 보조 정보 존재")
+    focus_reasons = firm_focus_reasons(persona, corp, company_profile)
+    if focus_reasons:
+        points += min(4, len(focus_reasons) * 2)
+        reasons.extend(focus_reasons[:2])
     return min(points, 18), " · ".join(reasons) or "감사 리드 중심, 부가자문 확장성 추가 확인 필요"
 
 
+def lead_context_points(persona: dict[str, Any], corp: dict[str, str]) -> tuple[int, str]:
+    signals = persona.get("erp_signals", {})
+    if not isinstance(signals, dict):
+        signals = {}
+    points = 0
+    reasons = []
+    if matches_corp_signal(signals.get("restricted_corp_codes"), corp):
+        points -= 30
+        reasons.append("ERP/CRM상 제한 또는 독립성 검토 대상")
+    if matches_corp_signal(signals.get("priority_accounts"), corp):
+        points += 10
+        reasons.append("ERP/CRM 우선 계정")
+    if matches_corp_signal(signals.get("warm_intro_corp_codes"), corp):
+        points += 8
+        reasons.append("기존 관계 기반 warm introduction 가능")
+    relationship_tags = as_text_list(signals.get("relationship_tags"))
+    if relationship_tags:
+        points += min(6, len(relationship_tags) * 2)
+        reasons.append("내부 관계 태그 존재")
+    return max(-30, min(points, 18)), " · ".join(reasons) or "내부 ERP/CRM 신호 없음"
+
+
+def firm_focus_reasons(
+    persona: dict[str, Any],
+    corp: dict[str, str],
+    company_profile: dict[str, Any],
+) -> list[str]:
+    reasons = []
+    haystack = normalize_search(
+        " ".join(
+            [
+                str(corp.get("corp_name", "")),
+                str(company_profile.get("corp_name", "")),
+                str(company_profile.get("corp_name_eng", "")),
+                str(company_profile.get("induty_code", "")),
+            ]
+        )
+    )
+    for keyword in as_text_list(persona.get("industry_focus_keywords")):
+        normalized = normalize_search(keyword)
+        if normalized and normalized in haystack:
+            reasons.append(f"firm context 산업 키워드 일치: {keyword}")
+            break
+
+    industry_code = str(company_profile.get("induty_code") or corp.get("induty_code") or "").strip()
+    for prefix in as_text_list(persona.get("industry_focus_codes")):
+        if industry_code and industry_code.startswith(prefix):
+            reasons.append(f"firm context 산업 코드 포커스 일치: {prefix}")
+            break
+    return reasons
+
+
+def matches_corp_signal(value: Any, corp: dict[str, str]) -> bool:
+    if not value:
+        return False
+    corp_code = str(corp.get("corp_code", "")).strip()
+    stock_code = str(corp.get("stock_code", "")).strip()
+    corp_name = normalize_search(corp.get("corp_name", ""))
+    items = value if isinstance(value, list) else [value]
+    for item in items:
+        candidates = []
+        if isinstance(item, dict):
+            candidates.extend(
+                [
+                    item.get("corp_code", ""),
+                    item.get("stock_code", ""),
+                    item.get("corp_name", ""),
+                    item.get("name", ""),
+                ]
+            )
+        else:
+            candidates.append(item)
+        for candidate in candidates:
+            text = str(candidate).strip()
+            normalized = normalize_search(text)
+            if not text:
+                continue
+            if text in {corp_code, stock_code}:
+                return True
+            if normalized and (normalized == corp_name or normalized in corp_name):
+                return True
+    return False
+
+
 def lead_friction_points(
-    is_current_samil: bool,
+    is_current_firm: bool,
+    firm_label: str,
     special_issues: list[dict[str, Any]],
     sales_case: dict[str, Any],
 ) -> tuple[int, str]:
     points = 0
     reasons = []
-    if is_current_samil:
+    if is_current_firm:
         points -= 18
-        reasons.append("현재 감사인이 삼일로 보여 신규 감사 수임 리드는 아님")
+        reasons.append(f"현재 감사인이 {firm_label}로 보여 신규 감사 수임 리드는 아님")
     if special_issues:
         points -= 4
         reasons.append("특이공시 원문 확인 전 컨택 리스크 존재")
@@ -1520,9 +1705,9 @@ def build_opening_angle(
     sales_case: dict[str, Any],
     segment: dict[str, Any],
     flags: list[dict[str, Any]],
-    is_current_samil: bool,
+    is_current_firm: bool,
 ) -> str:
-    if is_current_samil:
+    if is_current_firm:
         return "기존 감사 관계를 전제로 독립성 허용 범위 내 세무·딜·내부통제 후속 니즈를 확인"
     case_code = sales_case.get("code", "")
     if case_code == "designation_exit_opportunity":
@@ -1547,7 +1732,13 @@ def suggested_services_for_persona(
     segment: dict[str, Any],
     flags: list[dict[str, Any]],
 ) -> list[str]:
-    services = ["외부감사 선임/전환 리서치", "내부회계관리제도 및 감사위원회 커뮤니케이션 점검"]
+    services = []
+    for service in as_text_list(persona.get("service_lines")):
+        if service not in services:
+            services.append(service)
+    for service in ["외부감사 선임/전환 리서치", "내부회계관리제도 및 감사위원회 커뮤니케이션 점검"]:
+        if service not in services:
+            services.append(service)
     case_code = sales_case.get("code", "")
     if case_code in {"designation_exit_opportunity", "periodic_designation_watch"}:
         services.append("주기적 지정·자유선임 전환 사전 진단")
@@ -1563,17 +1754,20 @@ def suggested_services_for_persona(
 
 
 def build_recommendation_next_steps(
+    persona: dict[str, Any],
     sales_case: dict[str, Any],
     segment: dict[str, Any],
     flags: list[dict[str, Any]],
     special_issues: list[dict[str, Any]],
-    is_current_samil: bool,
+    is_current_firm: bool,
 ) -> list[str]:
     steps = []
-    if is_current_samil:
-        steps.append("현재 삼일 감사 관계 여부와 독립성 제한 범위를 내부 시스템에서 확인")
+    firm_label = str(persona.get("label") or "해당 회계법인")
+    if is_current_firm:
+        steps.append(f"현재 {firm_label} 감사 관계 여부와 독립성 제한 범위를 ERP/CRM에서 확인")
     else:
         steps.append("현 감사인 선임 사유가 자유선임인지 지정인지 원문 공시로 확인")
+        steps.append("ERP/CRM에서 기존 관계, 제한 계정, 담당 파트너, 산업 담당 조직 매칭 여부 확인")
     steps.append(sales_case.get("next_action", "감사인 선임보고 및 원문 공시 확인"))
     if segment.get("code") in {"large_private_or_business_report_filer_candidate", "audit_threshold_candidate"}:
         steps.append("자산·매출·부채·종업원 수와 사업보고서 제출대상 여부 확인")
@@ -1585,15 +1779,17 @@ def build_recommendation_next_steps(
 
 
 def build_recommendation_caveats(
-    is_current_samil: bool,
+    persona: dict[str, Any],
+    is_current_firm: bool,
     special_issues: list[dict[str, Any]],
 ) -> list[str]:
+    firm_label = str(persona.get("label") or "해당 회계법인")
     caveats = [
-        "추천 점수는 공개 공시와 삼일PwC 페르소나 기반의 영업 리서치 신호입니다.",
+        "추천 점수는 공개 공시와 설정된 firm context 기반의 영업 리서치 신호입니다.",
         "감사 수임 가능성은 독립성, 이해상충, 품질관리, 내부 승인 절차를 통과해야 판단할 수 있습니다.",
     ]
-    if is_current_samil:
-        caveats.append("현재 감사인이 삼일이면 신규 감사영업이 아니라 유지·부가자문 관점으로 해석해야 합니다.")
+    if is_current_firm:
+        caveats.append(f"현재 감사인이 {firm_label}이면 신규 감사영업이 아니라 유지·부가자문 관점으로 해석해야 합니다.")
     if special_issues:
         caveats.append("특이공시가 있는 회사는 컨택 전 원문과 후속 정정 여부를 먼저 확인해야 합니다.")
     return caveats
@@ -1648,7 +1844,7 @@ def build_recommendations(
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "query": query,
-        "firm_persona": get_firm_persona(DEFAULT_FIRM_PERSONA),
+        "firm_persona": get_firm_persona(),
         "recommendations": recommendations,
         "errors": errors,
         "notes": [
@@ -1714,7 +1910,7 @@ def build_demo_report() -> dict[str, Any]:
         external_error=None,
     )
     sales_strategy = build_sales_strategy(corp, analysis, coverage, [], {})
-    firm_persona = get_firm_persona(DEFAULT_FIRM_PERSONA)
+    firm_persona = get_firm_persona()
     lead_recommendation = build_lead_recommendation(
         firm_persona,
         corp,
@@ -1771,10 +1967,10 @@ def render_recommendations(payload: dict[str, Any], output_format: str) -> str:
         return json.dumps(payload, ensure_ascii=False, indent=2)
     firm = payload.get("firm_persona", {})
     lines = [
-        "# Samil Audit Radar Recommendations",
+        "# Audit Lead Radar Recommendations",
         "",
         f"- 검색어: **{payload.get('query', '')}**",
-        f"- 페르소나: **{firm.get('label', '')}**",
+        f"- Firm context: **{firm.get('label', '')}**",
         f"- 생성시각: `{payload.get('generated_at', '')}`",
         "",
         "## 추천 후보",
@@ -1816,7 +2012,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
     sales_strategy = payload.get("sales_strategy") or analysis.get("sales_strategy") or {}
     lead_recommendation = payload.get("lead_recommendation") or analysis.get("lead_recommendation") or {}
     lines = [
-        "# Samil Audit Radar Report",
+        "# Audit Lead Radar Report",
         "",
         f"- 회사: **{company.get('corp_name', '')}**",
         f"- 고유번호: `{company.get('corp_code', '')}`",
@@ -1849,9 +2045,9 @@ def render_markdown(payload: dict[str, Any]) -> str:
         lines.extend(
             [
                 "",
-                "## 삼일PwC 추천 판단",
+                "## Firm Context 추천 판단",
                 "",
-                f"- 페르소나: **{firm.get('label', '')}**",
+                f"- Firm context: **{firm.get('label', '')}**",
                 f"- 추천등급: **{lead_recommendation.get('grade', '')} / {lead_recommendation.get('fit_score', 0)}점**",
                 f"- 판단: **{lead_recommendation.get('verdict', '')}**",
                 f"- 리드 유형: {lead_recommendation.get('target_type', '')}",
@@ -2030,11 +2226,11 @@ def digits_int(value: Any) -> int:
 def run_server(host: str, port: int, config: AppConfig) -> None:
     handler = make_handler(config)
     server = ThreadingHTTPServer((host, port), handler)
-    print(f"Samil Audit Radar running at http://{host}:{port}")
+    print(f"Audit Lead Radar running at http://{host}:{port}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\nStopping Samil Audit Radar.")
+        print("\nStopping Audit Lead Radar.")
 
 
 def make_handler(config: AppConfig) -> type[BaseHTTPRequestHandler]:
@@ -2061,10 +2257,16 @@ def make_handler(config: AppConfig) -> type[BaseHTTPRequestHandler]:
                     )
                     return
                 if parsed.path == "/api/status":
+                    firm_context = get_firm_persona()
                     self.respond_json(
                         {
                             "has_api_key": bool(config.api_key),
                             "demo": config.demo,
+                            "firm_context": {
+                                "label": firm_context.get("label", ""),
+                                "code": firm_context.get("code", ""),
+                                "source": firm_context.get("_context_source", ""),
+                            },
                             "cache_ttl_seconds": RESPONSE_CACHE_TTL_SECONDS,
                             "rate_limit": {
                                 "window_seconds": RATE_LIMIT_WINDOW_SECONDS,
@@ -2194,7 +2396,7 @@ INDEX_HTML = r"""<!doctype html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Samil Audit Radar</title>
+  <title>Audit Lead Radar</title>
   <style>
     :root {
       color-scheme: light;
@@ -2245,7 +2447,7 @@ INDEX_HTML = r"""<!doctype html>
     .score-ring span { display: block; margin-top: 5px; color: #bfdbfe; font-size: 12px; }
     .recommendation-body strong { display: block; font-size: 16px; line-height: 1.35; }
     .recommendation-body p { margin: 6px 0 0; color: #29425f; line-height: 1.45; }
-    .driver-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 12px; }
+    .driver-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); gap: 8px; margin-top: 12px; }
     .driver { border: 1px solid #cfe0f6; border-radius: 6px; padding: 8px; background: #fff; min-width: 0; }
     .driver span { display: block; color: var(--muted); font-size: 11px; }
     .driver strong { display: block; margin-top: 4px; font-size: 14px; }
@@ -2287,8 +2489,8 @@ INDEX_HTML = r"""<!doctype html>
 </head>
 <body>
   <header>
-    <h1>Samil Audit Radar</h1>
-    <div class="subtitle">OpenDART 기반 감사인 연속연차 및 다음 지정/선임 이벤트 추정</div>
+    <h1>Audit Lead Radar</h1>
+    <div class="subtitle">ERP/CRM firm context + OpenDART 기반 감사영업 후보 추천</div>
   </header>
   <main>
     <section class="panel search-panel">
@@ -2310,7 +2512,7 @@ INDEX_HTML = r"""<!doctype html>
         <div id="results"></div>
       </section>
       <section class="panel">
-        <h2>감사 레이더</h2>
+        <h2>감사영업 레이더</h2>
         <div id="report">기업을 검색한 뒤 결과를 선택하세요.</div>
       </section>
     </div>
@@ -2427,12 +2629,12 @@ INDEX_HTML = r"""<!doctype html>
       const firm = data.firm_persona || {};
       const rows = data.recommendations || [];
       if (!rows.length) {
-        $("report").innerHTML = `<div class="report-meta"><div><span>추천 페르소나</span><strong>${esc(firm.label || "-")}</strong></div><div class="badge">추천 없음</div></div><p>추천 후보를 만들 수 없습니다.</p>`;
+        $("report").innerHTML = `<div class="report-meta"><div><span>Firm context</span><strong>${esc(firm.label || "-")}</strong></div><div class="badge">추천 없음</div></div><p>추천 후보를 만들 수 없습니다.</p>`;
         return;
       }
       $("report").innerHTML = `
         <div class="report-meta">
-          <div><span>추천 페르소나</span><strong>${esc(firm.label || "-")}</strong></div>
+          <div><span>Firm context</span><strong>${esc(firm.label || "-")}</strong></div>
           <div class="badge">추천 ${rows.length}개</div>
         </div>
         <div class="recommend-list">

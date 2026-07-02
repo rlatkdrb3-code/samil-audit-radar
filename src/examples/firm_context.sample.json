@@ -1,0 +1,38 @@
+{
+  "code": "erp_integrated_audit_firm",
+  "label": "ERP 연동 회계법인",
+  "positioning": "회계법인 ERP/CRM의 고객 관계, 산업 강점, 서비스 라인, 제한 신호를 OpenDART 공시와 결합해 감사영업 후보를 추천하는 샘플 컨텍스트",
+  "auditor_aliases": ["우리회계법인", "our audit firm"],
+  "strengths": [
+    "외부감사 및 내부회계관리제도 감사",
+    "상장사·대형비상장·금융회사 감사 전환 리서치",
+    "세무 리스크, 딜, 실사, 가치평가 등 인접 서비스 연결",
+    "산업별 담당 파트너와 기존 CRM 관계를 활용한 컨택 우선순위화"
+  ],
+  "service_lines": [
+    "외부감사 선임/전환 리서치",
+    "내부회계관리제도 및 감사위원회 커뮤니케이션 점검",
+    "세무 리스크 진단",
+    "M&A·실사·가치평가 사전 스크리닝",
+    "산업 전문 자문"
+  ],
+  "preferred_leads": [
+    "감사인 교체 또는 자유선임 전환 타이밍이 가까운 회사",
+    "상장사, 대형비상장, 금융회사, 사업보고서 제출대상처럼 공시·통제 요구가 큰 회사",
+    "외부감사 최초 진입, 미제출·정정 등 회계 컴플라이언스 이슈가 보이는 회사",
+    "ERP/CRM상 기존 관계, warm introduction, 산업 포커스와 연결되는 감사 관계 후보"
+  ],
+  "industry_focus_keywords": ["금융", "바이오", "방산", "제조", "플랫폼"],
+  "industry_focus_codes": ["21", "26", "30", "64", "65", "66"],
+  "erp_signals": {
+    "relationship_tags": [],
+    "restricted_corp_codes": [],
+    "warm_intro_corp_codes": [],
+    "priority_accounts": []
+  },
+  "public_basis": [
+    "OpenDART 공개 공시",
+    "외부감사법상 감사인 선임·지정 제도",
+    "회계법인 ERP/CRM에 저장 가능한 고객 관계·산업·제한 신호의 샘플 스키마"
+  ]
+}

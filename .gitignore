@@ -1,6 +1,7 @@
 .env
 .env.*
 !.env.example
+firm_context.local.json
 .cache/
 logs/
 __pycache__/
