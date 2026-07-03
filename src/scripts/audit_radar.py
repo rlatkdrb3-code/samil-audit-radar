@@ -15,7 +15,7 @@ import urllib.request
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
@@ -25,6 +25,7 @@ from xml.etree import ElementTree
 
 
 BASE_URL = "https://opendart.fss.or.kr/api"
+SARAMIN_JOB_SEARCH_URL = "https://oapi.saramin.co.kr/job-search"
 DART_VIEWER_URL = "https://dart.fss.or.kr/dsaf001/main.do"
 REPORT_CODE_ANNUAL = "11011"
 DEFAULT_YEARS = 10
@@ -130,6 +131,87 @@ DEFAULT_FIRM_CONTEXT = {
     ],
 }
 DEFAULT_FIRM_PERSONA = DEFAULT_FIRM_CONTEXT["code"]
+DEFAULT_JOB_SIGNAL_SEEDS = [
+    "내부회계",
+    "연결결산",
+    "K-IFRS",
+    "DART",
+    "XBRL",
+    "이전가격",
+    "국제조세",
+    "세무조사",
+    "M&A",
+    "Valuation",
+    "FDD",
+    "IPO",
+    "SAP",
+    "ERP",
+]
+JOB_SIGNAL_RULES = {
+    "assurance_risk": {
+        "label": "Assurance/Risk",
+        "service": "내부통제·회계자문·공시자문",
+        "keywords": [
+            "내부회계",
+            "ICFR",
+            "SOX",
+            "외부감사",
+            "감사대응",
+            "감사 대응",
+            "K-IFRS",
+            "IFRS",
+            "연결결산",
+            "DART",
+            "XBRL",
+            "주석",
+            "회계감리",
+            "공시",
+        ],
+    },
+    "tax": {
+        "label": "Tax",
+        "service": "세무자문·국제조세·이전가격",
+        "keywords": [
+            "이전가격",
+            "국제조세",
+            "세무조사",
+            "법인세",
+            "부가가치세",
+            "VAT",
+            "관세",
+            "해외법인",
+            "BEPS",
+            "원천세",
+        ],
+    },
+    "deals": {
+        "label": "Deals",
+        "service": "재무자문·실사·가치평가",
+        "keywords": [
+            "M&A",
+            "인수합병",
+            "PMI",
+            "Valuation",
+            "가치평가",
+            "FDD",
+            "실사",
+            "PPA",
+            "영업권",
+            "투자검토",
+            "사업양수도",
+        ],
+    },
+    "capital_markets": {
+        "label": "Capital Markets",
+        "service": "IPO·상장·자금조달 자문",
+        "keywords": ["IPO", "상장준비", "IR", "증권신고서", "유상증자", "회사채", "CB", "BW"],
+    },
+    "finance_transformation": {
+        "label": "Finance Transformation",
+        "service": "재무시스템·결산 자동화 자문",
+        "keywords": ["SAP", "ERP", "결산 자동화", "재무시스템", "EPM", "연결시스템", "BI"],
+    },
+}
 
 
 @dataclass
@@ -137,6 +219,7 @@ class AppConfig:
     api_key: str | None
     current_year: int
     demo: bool = False
+    saramin_key: str | None = None
 
 
 def main() -> int:
@@ -163,6 +246,20 @@ def main() -> int:
     recommend.add_argument("--format", choices=("markdown", "json"), default="markdown")
     recommend.add_argument("--demo", action="store_true")
 
+    jobs = sub.add_parser("jobs", help="Fetch Saramin job posts and extract Samil service demand signals")
+    jobs.add_argument("--company", help="Optional company name to combine with each signal keyword")
+    jobs.add_argument(
+        "--seed",
+        action="append",
+        dest="seeds",
+        help="Search seed keyword. Repeat to override defaults, e.g. --seed 내부회계 --seed 이전가격",
+    )
+    jobs.add_argument("--days", type=int, default=14, help="Published date lookback window")
+    jobs.add_argument("--limit", type=int, default=30)
+    jobs.add_argument("--stock", default="kospi kosdaq konex", help="Saramin stock filter")
+    jobs.add_argument("--format", choices=("markdown", "json"), default="markdown")
+    jobs.add_argument("--demo", action="store_true")
+
     serve = sub.add_parser("serve", help="Run the local web service")
     serve.add_argument("--host", default=os.environ.get("HOST", "127.0.0.1"))
     serve.add_argument("--port", type=int, default=env_int("PORT", 8765))
@@ -176,6 +273,7 @@ def main() -> int:
         api_key=load_api_key(),
         current_year=date.today().year,
         demo=getattr(args, "demo", False) or args.command == "demo",
+        saramin_key=load_saramin_key(),
     )
 
     if args.command == "search":
@@ -204,6 +302,17 @@ def main() -> int:
         )
         print(render_recommendations(payload, args.format))
         return 0
+    if args.command == "jobs":
+        payload = build_job_opportunities(
+            config,
+            company=args.company,
+            seeds=args.seeds or DEFAULT_JOB_SIGNAL_SEEDS,
+            days=args.days,
+            limit=args.limit,
+            stock=args.stock,
+        )
+        print(render_job_opportunities(payload, args.format))
+        return 0
     if args.command == "serve":
         run_server(args.host, args.port, config)
         return 0
@@ -228,8 +337,9 @@ def clamp_years(value: int) -> int:
     return max(MIN_YEARS, min(MAX_YEARS, value))
 
 
-def load_api_key() -> str | None:
-    for key_name in ("DART_API_KEY", "OPEN_DART_API_KEY", "OPENDART_API_KEY"):
+def load_env_value(key_names: tuple[str, ...]) -> str | None:
+    key_set = set(key_names)
+    for key_name in key_names:
         value = os.environ.get(key_name)
         if value and value.strip():
             return value.strip()
@@ -242,11 +352,19 @@ def load_api_key() -> str | None:
             if not stripped or stripped.startswith("#") or "=" not in stripped:
                 continue
             name, value = stripped.split("=", 1)
-            if name.strip() in {"DART_API_KEY", "OPEN_DART_API_KEY", "OPENDART_API_KEY"}:
+            if name.strip() in key_set:
                 cleaned = value.strip().strip('"').strip("'")
                 if cleaned:
                     return cleaned
     return None
+
+
+def load_api_key() -> str | None:
+    return load_env_value(("DART_API_KEY", "OPEN_DART_API_KEY", "OPENDART_API_KEY"))
+
+
+def load_saramin_key() -> str | None:
+    return load_env_value(("SARAMIN_ACCESS_KEY", "SARAMIN_API_KEY"))
 
 
 def require_key(config: AppConfig) -> str:
@@ -257,6 +375,16 @@ def require_key(config: AppConfig) -> str:
             "DART_API_KEY is not set. Set it in your shell or create .env.local."
         )
     return config.api_key
+
+
+def require_saramin_key(config: AppConfig) -> str:
+    if config.demo:
+        return "DEMO"
+    if not config.saramin_key:
+        raise RuntimeError(
+            "SARAMIN_ACCESS_KEY is not set. Apply for a Saramin API access-key and set it in your shell or .env.local."
+        )
+    return config.saramin_key
 
 
 def dart_get(endpoint: str, config: AppConfig, params: dict[str, str]) -> dict[str, Any]:
@@ -272,6 +400,257 @@ def dart_get(endpoint: str, config: AppConfig, params: dict[str, str]) -> dict[s
         return payload
     message = payload.get("message", "Unknown OpenDART error")
     raise RuntimeError(f"OpenDART error {status}: {message}")
+
+
+def saramin_get(config: AppConfig, params: dict[str, Any]) -> dict[str, Any]:
+    access_key = require_saramin_key(config)
+    query = {key: str(value) for key, value in params.items() if value not in (None, "")}
+    query["access-key"] = access_key
+    url = f"{SARAMIN_JOB_SEARCH_URL}?{urllib.parse.urlencode(query)}"
+    request = urllib.request.Request(url, headers={"Accept": "application/json"})
+    with urllib.request.urlopen(request, timeout=20) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def build_job_opportunities(
+    config: AppConfig,
+    *,
+    company: str | None,
+    seeds: list[str],
+    days: int,
+    limit: int,
+    stock: str,
+) -> dict[str, Any]:
+    seeds = clean_job_seeds(seeds)
+    days = max(1, min(90, days))
+    limit = max(1, min(110, limit))
+    if config.demo:
+        jobs = demo_job_posts()
+    else:
+        jobs = fetch_saramin_job_posts(config, company=company, seeds=seeds, days=days, limit=limit, stock=stock)
+    scored = [score_job_post(job) for job in jobs]
+    scored = [job for job in scored if job.get("signals")]
+    scored.sort(
+        key=lambda item: (
+            -int_or_zero(item.get("opportunity_score")),
+            str(item.get("company", "")),
+            str(item.get("title", "")),
+        )
+    )
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "source": "Saramin Job Search API" if not config.demo else "Demo fixture",
+        "company": company or "",
+        "days": days,
+        "stock": stock,
+        "seeds": seeds,
+        "jobs": scored[:limit],
+        "notes": [
+            "사람인 API의 keywords 검색은 기업명, 공고명, 업직종, 직무내용을 대상으로 합니다.",
+            "채용공고 신호는 서비스 수요의 초기 징후이며, 영업 제안 전 원문과 독립성 검토가 필요합니다.",
+        ],
+    }
+
+
+def clean_job_seeds(seeds: list[str]) -> list[str]:
+    cleaned = []
+    seen = set()
+    for seed in seeds:
+        item = re.sub(r"\s+", " ", str(seed or "")).strip()
+        if not item:
+            continue
+        key = normalize_search(item)
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(item)
+    return cleaned or list(DEFAULT_JOB_SIGNAL_SEEDS)
+
+
+def fetch_saramin_job_posts(
+    config: AppConfig,
+    *,
+    company: str | None,
+    seeds: list[str],
+    days: int,
+    limit: int,
+    stock: str,
+) -> list[dict[str, Any]]:
+    published_min = (date.today() - timedelta(days=days)).isoformat()
+    per_seed_count = min(30, max(10, limit))
+    jobs_by_id: dict[str, dict[str, Any]] = {}
+    for seed in seeds:
+        keyword = f"{company} {seed}".strip() if company else seed
+        payload = saramin_get(
+            config,
+            {
+                "keywords": keyword,
+                "stock": stock,
+                "published_min": published_min,
+                "sort": "pd",
+                "count": per_seed_count,
+                "fields": "posting-date expiration-date keyword-code count",
+            },
+        )
+        for raw_job in as_list(((payload.get("jobs") or {}).get("job"))):
+            job = normalize_saramin_job(raw_job, seed)
+            if not job.get("id"):
+                continue
+            existing = jobs_by_id.get(job["id"])
+            if existing is None:
+                jobs_by_id[job["id"]] = job
+            else:
+                merge_job_seed(existing, seed)
+    return list(jobs_by_id.values())
+
+
+def normalize_saramin_job(raw_job: dict[str, Any], seed: str) -> dict[str, Any]:
+    company_detail = ((raw_job.get("company") or {}).get("detail") or {})
+    position = raw_job.get("position") or {}
+    industry = position.get("industry") or {}
+    location = position.get("location") or {}
+    job_type = position.get("job-type") or {}
+    job = {
+        "id": str(raw_job.get("id", "")).strip(),
+        "url": str(raw_job.get("url", "")).strip(),
+        "active": str(raw_job.get("active", "")).strip(),
+        "company": str(company_detail.get("name", "")).strip(),
+        "company_url": str(company_detail.get("href", "")).strip(),
+        "title": str(position.get("title", "")).strip(),
+        "industry": str(industry.get("name", "")).strip(),
+        "location": str(location.get("name", "")).strip(),
+        "job_type": str(job_type.get("name", "")).strip(),
+        "posting_timestamp": str(raw_job.get("posting-timestamp", "")).strip(),
+        "posting_date": str(raw_job.get("posting-date", "")).strip(),
+        "expiration_date": str(raw_job.get("expiration-date", "")).strip(),
+        "keyword_codes": raw_job.get("keyword-code", ""),
+        "search_seeds": [],
+    }
+    merge_job_seed(job, seed)
+    return job
+
+
+def merge_job_seed(job: dict[str, Any], seed: str) -> None:
+    seeds = job.setdefault("search_seeds", [])
+    if seed and seed not in seeds:
+        seeds.append(seed)
+
+
+def score_job_post(job: dict[str, Any]) -> dict[str, Any]:
+    text = " ".join(
+        str(value or "")
+        for value in (
+            job.get("company"),
+            job.get("title"),
+            job.get("industry"),
+            job.get("location"),
+            " ".join(as_text_list(job.get("search_seeds"))),
+        )
+    )
+    compact_text = normalize_search(text)
+    signals = []
+    all_matches = []
+    for code, rule in JOB_SIGNAL_RULES.items():
+        matches = []
+        for keyword in rule["keywords"]:
+            if keyword_matches_text(keyword, text, compact_text):
+                matches.append(keyword)
+        matches = unique_text(matches)
+        if not matches:
+            continue
+        score = min(100, 25 + len(matches) * 15)
+        signals.append(
+            {
+                "code": code,
+                "label": rule["label"],
+                "service": rule["service"],
+                "score": score,
+                "matched_keywords": matches,
+            }
+        )
+        all_matches.extend(matches)
+    signals.sort(key=lambda item: (-int_or_zero(item.get("score")), str(item.get("label", ""))))
+    top_signal = signals[0] if signals else {}
+    enriched = dict(job)
+    enriched["signals"] = signals
+    enriched["matched_keywords"] = unique_text(all_matches)
+    enriched["recommended_service"] = top_signal.get("service", "")
+    enriched["recommended_path"] = top_signal.get("label", "")
+    enriched["opportunity_score"] = min(100, sum(int_or_zero(signal.get("score")) for signal in signals[:2]))
+    return enriched
+
+
+def keyword_matches_text(keyword: str, text: str, compact_text: str) -> bool:
+    keyword_text = str(keyword or "").strip()
+    if not keyword_text:
+        return False
+    return keyword_text.lower() in text.lower() or normalize_search(keyword_text) in compact_text
+
+
+def unique_text(values: list[str]) -> list[str]:
+    result = []
+    seen = set()
+    for value in values:
+        item = str(value or "").strip()
+        key = normalize_search(item)
+        if not item or key in seen:
+            continue
+        seen.add(key)
+        result.append(item)
+    return result
+
+
+def as_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    return [value]
+
+
+def demo_job_posts() -> list[dict[str, Any]]:
+    rows = [
+        {
+            "id": "demo-icfr",
+            "url": "https://example.com/jobs/demo-icfr",
+            "active": "1",
+            "company": "샘플테크",
+            "title": "K-IFRS 연결결산 및 내부회계관리제도 담당자",
+            "industry": "반도체·전자",
+            "location": "서울",
+            "job_type": "정규직",
+            "posting_date": date.today().isoformat(),
+            "expiration_date": "",
+            "search_seeds": ["연결결산", "내부회계", "K-IFRS"],
+        },
+        {
+            "id": "demo-tax",
+            "url": "https://example.com/jobs/demo-tax",
+            "active": "1",
+            "company": "샘플글로벌",
+            "title": "국제조세 및 이전가격 문서화 담당",
+            "industry": "플랫폼",
+            "location": "서울",
+            "job_type": "정규직",
+            "posting_date": date.today().isoformat(),
+            "expiration_date": "",
+            "search_seeds": ["국제조세", "이전가격"],
+        },
+        {
+            "id": "demo-deals",
+            "url": "https://example.com/jobs/demo-deals",
+            "active": "1",
+            "company": "샘플홀딩스",
+            "title": "M&A 투자검토 및 Valuation 담당",
+            "industry": "지주회사",
+            "location": "서울",
+            "job_type": "정규직",
+            "posting_date": date.today().isoformat(),
+            "expiration_date": "",
+            "search_seeds": ["M&A", "Valuation", "투자검토"],
+        },
+    ]
+    return rows
 
 
 def load_corp_codes(config: AppConfig, *, refresh: bool = False) -> list[dict[str, str]]:
@@ -2250,6 +2629,55 @@ def render_recommendations(payload: dict[str, Any], output_format: str) -> str:
     return "\n".join(lines).rstrip()
 
 
+def render_job_opportunities(payload: dict[str, Any], output_format: str) -> str:
+    if output_format == "json":
+        return json.dumps(payload, ensure_ascii=False, indent=2)
+    lines = [
+        "# Saramin Job Opportunity Signals",
+        "",
+        f"- 출처: {payload.get('source', '')}",
+        f"- 회사 필터: {payload.get('company') or '전체'}",
+        f"- 기간: 최근 {payload.get('days', '')}일",
+        f"- 상장 필터: {payload.get('stock', '')}",
+        f"- 검색 seed: {', '.join(payload.get('seeds', []))}",
+        "",
+        "## 채용공고 신호",
+        "",
+    ]
+    jobs = payload.get("jobs", [])
+    if not jobs:
+        lines.append("- 관련 키워드가 매칭된 채용공고를 찾지 못했습니다.")
+    else:
+        lines.extend(
+            [
+                "| # | 회사 | 공고 | 추천 경로 | 점수 | 매칭 키워드 | 링크 |",
+                "| --- | --- | --- | --- | --- | --- | --- |",
+            ]
+        )
+        for index, job in enumerate(jobs, start=1):
+            link = job.get("url", "")
+            link_text = f"[원문]({link})" if link else "-"
+            lines.append(
+                "| "
+                + " | ".join(
+                    [
+                        str(index),
+                        clean_md(job.get("company", "")),
+                        clean_md(job.get("title", "")),
+                        clean_md(job.get("recommended_service") or job.get("recommended_path") or "-"),
+                        clean_md(job.get("opportunity_score", 0)),
+                        clean_md(", ".join(job.get("matched_keywords", []))),
+                        clean_md(link_text),
+                    ]
+                )
+                + " |"
+            )
+    lines.extend(["", "## 해석 메모", ""])
+    for note in payload.get("notes", []):
+        lines.append(f"- {note}")
+    return "\n".join(lines).rstrip()
+
+
 def render_markdown(payload: dict[str, Any]) -> str:
     company = payload["company"]
     analysis = payload["analysis"]
@@ -2539,9 +2967,10 @@ def make_handler(config: AppConfig) -> type[BaseHTTPRequestHandler]:
                 if parsed.path == "/api/status":
                     firm_context = get_firm_persona()
                     self.respond_json(
-                        {
-                            "has_api_key": bool(config.api_key),
-                            "demo": config.demo,
+	                        {
+	                            "has_api_key": bool(config.api_key),
+	                            "has_saramin_key": bool(config.saramin_key),
+	                            "demo": config.demo,
                             "firm_context": {
                                 "label": firm_context.get("label", ""),
                                 "code": firm_context.get("code", ""),

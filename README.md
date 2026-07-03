@@ -29,10 +29,11 @@ samil-audit-radar/
 
 ## 실행 방법
 
-먼저 OpenDART API 키를 환경변수로 설정합니다.
+먼저 OpenDART API 키를 환경변수로 설정합니다. 채용공고 신호까지 쓰려면 사람인 API access-key도 함께 설정합니다.
 
 ```bash
 export DART_API_KEY="발급받은_키"
+export SARAMIN_ACCESS_KEY="사람인_access_key"
 ```
 
 회사 검색:
@@ -54,7 +55,16 @@ python3 scripts/audit_radar.py report 삼성전자 --years 10 --output audit-rad
 python3 scripts/audit_radar.py recommend 삼성전자 --years 10
 ```
 
+사람인 채용공고에서 삼일 서비스 수요 신호 추출:
+
+```bash
+python3 scripts/audit_radar.py jobs --days 14 --limit 30
+python3 scripts/audit_radar.py jobs --company 삼성전자 --seed 내부회계 --seed 이전가격 --format json
+```
+
 회사 검색은 OpenDART 고유번호 목록에서 종목코드가 있는 상장사 후보만 남긴 뒤, 완전일치, 고유번호, 종목코드, 앞부분 일치, 회사명 포함 여부 순으로 점수를 매깁니다. 예를 들어 `삼성전자`를 검색하면 `삼성전자`가 먼저 나오고, 이름에 키워드가 포함된 상장사 후보가 이어집니다.
+
+채용공고 검색은 사람인 Job Search API를 사용합니다. 사람인 API 사이트에서 이용 신청 및 승인 후 발급받은 `access-key`를 `SARAMIN_ACCESS_KEY`로 설정합니다. 기본 seed는 `내부회계`, `연결결산`, `K-IFRS`, `DART`, `XBRL`, `이전가격`, `국제조세`, `세무조사`, `M&A`, `Valuation`, `FDD`, `IPO`, `SAP`, `ERP`입니다. 사람인 API의 `keywords` 검색은 기업명, 공고명, 업직종, 직무내용을 대상으로 하므로, 이 플러그인은 seed별 검색 결과를 합쳐 Assurance/Risk, Tax, Deals, Capital Markets, Finance Transformation 수요 신호로 점수화합니다.
 
 Firm context를 바꾸려면 `src/examples/firm_context.sample.json`을 참고해 루트에 `firm_context.local.json`을 만들거나, `AUDIT_FIRM_CONTEXT` 환경변수에 JSON 경로를 지정합니다. 기본값은 삼일PwC 페르소나입니다. 이 파일에는 회계법인명, 감사인 alias, 산업 포커스, 서비스 라인, ERP/CRM상 우선 계정·제한 계정·warm introduction 신호, 내부 인력의 업종 전문성, 감사대상 회사 의사결정 후보군과의 관계 edge를 넣을 수 있습니다. `firm_context.local.json`은 커밋되지 않도록 `.gitignore`에 포함되어 있습니다.
 
@@ -84,7 +94,7 @@ Render 배포 예시:
 1. 이 폴더를 GitHub 저장소로 push합니다.
 2. Render에서 New Web Service를 만들고 저장소를 연결합니다.
 3. Start command는 `python3 src/scripts/audit_radar.py serve --host 0.0.0.0`를 사용합니다.
-4. Environment Variables에 `DART_API_KEY`를 추가합니다.
+4. Environment Variables에 `DART_API_KEY`와, 채용공고 기능을 쓰려면 `SARAMIN_ACCESS_KEY`를 추가합니다.
 5. Health check path는 `/healthz`를 사용합니다.
 
 배포 서버에는 다음 보호장치가 들어 있습니다.

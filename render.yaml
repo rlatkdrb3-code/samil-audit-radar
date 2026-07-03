@@ -9,5 +9,7 @@ services:
     envVars:
       - key: DART_API_KEY
         sync: false
+      - key: SARAMIN_ACCESS_KEY
+        sync: false
       - key: HOST
         value: 0.0.0.0

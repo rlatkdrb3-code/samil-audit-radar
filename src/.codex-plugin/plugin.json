@@ -1,21 +1,22 @@
 {
   "name": "audit-lead-radar",
   "version": "0.1.0",
-  "description": "Recommend Korean listed audit-sales targets for the Samil PwC persona by combining OpenDART auditor, fee/time, executive, and firm-context signals.",
+  "description": "Recommend Korean listed service opportunities for the Samil PwC persona by combining Saramin hiring signals with OpenDART auditor, fee/time, executive, and firm-context signals.",
   "author": {
     "name": "AX Hackathon Participant"
   },
   "skills": "./skills/",
   "interface": {
     "displayName": "Samil Listed Audit Radar",
-    "shortDescription": "Recommend listed audit-sales targets from OpenDART and Samil PwC context.",
-    "longDescription": "A Codex plugin for Samil PwC-persona audit lead research. It uses OpenDART public disclosures for listed companies to identify the current auditor, recent auditor history, consecutive auditor tenure, audit service fee/time, executive major-career signals, likely periodic designation or free-appointment timing, and sales-fit signals from configured firm context.",
+    "shortDescription": "Recommend listed service opportunities from hiring and OpenDART signals.",
+    "longDescription": "A Codex plugin for Samil PwC-persona opportunity research. It uses Saramin hiring signals plus OpenDART public disclosures for listed companies to identify likely Assurance/Risk, Tax, Deals, Capital Markets, and Finance Transformation demand, then checks current auditor, auditor tenure, audit service fee/time, executive major-career signals, and configured firm context.",
     "developerName": "AX Hackathon Participant",
     "category": "Productivity",
     "capabilities": ["Read", "Write"],
     "defaultPrompt": [
       "상장사명으로 감사인 연속연차를 조회해줘.",
       "OpenDART 기반 감사인 지정 타이밍과 감사보수를 분석해줘.",
+      "최근 채용공고에서 삼일 서비스 수요 신호를 추출해줘.",
       "Samil Listed Audit Radar 웹서비스를 실행해줘."
     ]
   }

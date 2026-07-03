@@ -32,6 +32,15 @@ This plugin is grounded in public audit disclosure and auditor appointment rules
 - External Audit Act Enforcement Decree, audit report submission and public inspection: https://www.law.go.kr/LSW/lumLsLinkPop.do?lspttninfSeq=149589
   - Requires submitted audit reports to be made available for public inspection on internet websites for the statutory period.
 
+## Hiring Signal API
+
+- Saramin API introduction: https://oapi.saramin.co.kr/
+  - Saramin provides a developer API for job posting data after API application and approval.
+- Saramin Job Search API: https://oapi.saramin.co.kr/guide/job-search
+  - Provides `GET https://oapi.saramin.co.kr/job-search` with `access-key`, `keywords`, `stock`, date filters, sorting, and count parameters.
+  - The `keywords` parameter searches company name, posting title, job/industry fields, and job description text.
+  - The plugin uses this API as an early signal source, not as proof of confirmed advisory demand.
+
 ## Periodic Designation and Appointment Rules
 
 - FSC press release on periodic designation: https://www.fsc.go.kr/no010101/84372
