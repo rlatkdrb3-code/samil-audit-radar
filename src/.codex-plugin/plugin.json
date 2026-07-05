@@ -1,23 +1,23 @@
 {
   "name": "audit-lead-radar",
   "version": "0.1.0",
-  "description": "Recommend Korean listed service opportunities for the Samil PwC persona by combining Saramin hiring signals with OpenDART auditor, fee/time, executive, and firm-context signals.",
+  "description": "Monitor Korean listed companies' external auditor history, expected auditor-change timing, executive disclosures, audit fee/time data, and public auditor appointment notices using OpenDART.",
   "author": {
     "name": "AX Hackathon Participant"
   },
   "skills": "./skills/",
   "interface": {
-    "displayName": "Samil Listed Audit Radar",
-    "shortDescription": "Recommend listed service opportunities from hiring and OpenDART signals.",
-    "longDescription": "A Codex plugin for Samil PwC-persona opportunity research. It uses Saramin hiring signals plus OpenDART public disclosures for listed companies to identify likely Assurance/Risk, Tax, Deals, Capital Markets, and Finance Transformation demand, then checks current auditor, auditor tenure, audit service fee/time, executive major-career signals, and configured firm context.",
+    "displayName": "Audit Appointment Radar",
+    "shortDescription": "Check auditor history, rotation timing, executives, and auditor appointment notices.",
+    "longDescription": "A Codex plugin for external-auditor appointment monitoring. It uses OpenDART public disclosures for listed companies to summarize the current auditor, recent auditor history, estimated auditor replacement or reappointment review timing, audit service fee/time including hourly fee, executive disclosures, and whether auditor tender or appointment notices are currently identifiable from public disclosures.",
     "developerName": "AX Hackathon Participant",
     "category": "Productivity",
     "capabilities": ["Read", "Write"],
     "defaultPrompt": [
-      "상장사명으로 감사인 연속연차를 조회해줘.",
-      "OpenDART 기반 감사인 지정 타이밍과 감사보수를 분석해줘.",
-      "최근 채용공고에서 삼일 서비스 수요 신호를 추출해줘.",
-      "Samil Listed Audit Radar 웹서비스를 실행해줘."
+      "상장사명으로 현재 감사인과 감사인 이력을 조회해줘.",
+      "OpenDART 기반 감사인 교체 예상시기와 남은 기간을 정리해줘.",
+      "임원 현황과 감사용역 보수·시간당 보수를 보여줘.",
+      "현재 외부감사인 입찰 또는 선임 공고가 있는지 확인해줘."
     ]
   }
 }
