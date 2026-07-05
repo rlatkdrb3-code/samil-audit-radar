@@ -96,6 +96,11 @@ AUDIT_RULE_SOURCES = {
         "title": "2026년 외부감사인 선임시 유의사항 안내",
         "url": "https://eiec.kdi.re.kr/policy/materialView.do?num=273968",
     },
+    "fsc_accounting_reform": {
+        "label": "금융위 회계투명성 대책",
+        "title": "회계 투명성 및 신뢰성 제고를 위한 종합대책",
+        "url": "https://www.fsc.go.kr/po010105/72558?curPage=5&srchCtgry=5",
+    },
 }
 BIG4_ALIASES = {
     "samil": "삼일",
@@ -117,6 +122,20 @@ SPECIAL_ISSUE_KEYWORDS = (
     "제출기한",
     "연장",
     "정정",
+)
+AUDITOR_TENDER_KEYWORDS = (
+    "공개입찰",
+    "입찰공고",
+    "제안요청",
+    "제안서",
+    "선정공고",
+    "선임공고",
+    "변경선임공고",
+    "감사인선정",
+    "감사인선임",
+    "회계감사인선정",
+    "외부감사인선정",
+    "외부감사인선임",
 )
 FINANCIAL_NAME_KEYWORDS = (
     "금융",
@@ -855,6 +874,7 @@ def build_report(
         as_of=date.today(),
         executives=executive_history,
         special_issues=disclosure_bundle["special_issues"],
+        tender_notices=disclosure_bundle["tender_notices"],
     )
     if disclosure_bundle["special_issues"] and analysis.get("status") == "ok":
         analysis.setdefault("follow_up", []).insert(
@@ -903,6 +923,7 @@ def build_report(
         },
         "audit_disclosures": disclosure_bundle["filings"],
         "special_issues": disclosure_bundle["special_issues"],
+        "tender_notices": disclosure_bundle["tender_notices"],
         "coverage": coverage,
         "service_contracts": service_history,
         "executives": executive_history,
@@ -967,16 +988,20 @@ def fetch_external_audit_disclosures(
             pblntf_ty="F",
         )
     except RuntimeError as exc:
-        return {"history": [], "filings": [], "special_issues": [], "error": str(exc)}
+        return {"history": [], "filings": [], "special_issues": [], "tender_notices": [], "error": str(exc)}
 
     normalized_filings = [normalize_filing_row(row) for row in filings]
     history_by_year: dict[str, dict[str, Any]] = {}
     special_issues: list[dict[str, Any]] = []
+    tender_notices: list[dict[str, Any]] = []
 
     for filing in normalized_filings:
         issue = classify_special_issue(filing)
         if issue:
             special_issues.append(issue)
+        tender_notice = classify_auditor_tender_notice(filing)
+        if tender_notice:
+            tender_notices.append(tender_notice)
 
         if not is_external_audit_report_filing(filing):
             continue
@@ -991,10 +1016,12 @@ def fetch_external_audit_disclosures(
     history = list(history_by_year.values())
     history.sort(key=lambda row: int_or_zero(row.get("bsns_year")), reverse=True)
     special_issues.sort(key=lambda row: row.get("rcept_dt", ""), reverse=True)
+    tender_notices.sort(key=lambda row: row.get("rcept_dt", ""), reverse=True)
     return {
         "history": history[:years],
         "filings": normalized_filings,
         "special_issues": special_issues[:20],
+        "tender_notices": tender_notices[:20],
         "error": None,
     }
 
@@ -1139,6 +1166,30 @@ def classify_special_issue(filing: dict[str, Any]) -> dict[str, Any] | None:
     issue = dict(filing)
     issue["issue_type"] = ", ".join(labels or ["특이 키워드 포함"])
     return issue
+
+
+def classify_auditor_tender_notice(filing: dict[str, Any]) -> dict[str, Any] | None:
+    report_name = filing.get("report_nm", "")
+    compact = re.sub(r"\s+", "", report_name)
+    if "감사보고서" in compact or "감사전재무제표" in compact:
+        return None
+    if not any(anchor in compact for anchor in ("외부감사인", "회계감사인", "감사인")):
+        return None
+    if not any(keyword in compact for keyword in AUDITOR_TENDER_KEYWORDS):
+        return None
+    labels = []
+    if any(keyword in compact for keyword in ("공개입찰", "입찰공고")):
+        labels.append("공개입찰")
+    if any(keyword in compact for keyword in ("제안요청", "제안서")):
+        labels.append("제안요청")
+    if any(keyword in compact for keyword in ("선임공고", "선정공고", "변경선임공고", "선임", "선정")):
+        labels.append("선임/선정 공고")
+    notice = dict(filing)
+    notice["issue_type"] = " / ".join(labels or ["감사인 선임 신호"])
+    notice["source_kind"] = "auditor_tender_notice"
+    notice["source_detail"] = "OpenDART 외부감사관련 공시목록"
+    notice["source_note"] = "보고서명 키워드 기준 자동 분류이며 회사 홈페이지/IR 공고는 별도 검색이 필요할 수 있습니다."
+    return notice
 
 
 def merge_audit_sources(
@@ -1586,6 +1637,7 @@ def attach_event_schedule(
     as_of: date,
     executives: list[dict[str, Any]] | None = None,
     special_issues: list[dict[str, Any]] | None = None,
+    tender_notices: list[dict[str, Any]] | None = None,
 ) -> None:
     analysis["applicable_rules"] = build_audit_applicability(
         corp,
@@ -1594,6 +1646,7 @@ def attach_event_schedule(
         as_of=as_of,
         executives=executives or [],
         special_issues=special_issues or [],
+        tender_notices=tender_notices or [],
     )
     schedule = build_audit_event_schedule(corp, company_profile, analysis, as_of=as_of)
     analysis["event_schedule"] = schedule
@@ -1608,6 +1661,7 @@ def build_audit_applicability(
     as_of: date,
     executives: list[dict[str, Any]],
     special_issues: list[dict[str, Any]],
+    tender_notices: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     if analysis.get("status") != "ok":
         return []
@@ -1710,6 +1764,35 @@ def build_audit_applicability(
             "감사시간, 감사인력, 감사보수, 감사계획의 적정성 및 감사인의 독립성·전문성을 기준으로 문서화해야 합니다.",
             "후보별 감사계획/보수/투입시간 비교표와 전기감사인 의견진술 내용을 선임 파일에 묶어 확인하세요.",
             ["external_audit_decree_13", "fss_2026_appointment"],
+        )
+    )
+
+    if tender_notices:
+        tender_labels = ", ".join(shorten(str(item.get("report_nm") or item.get("issue_type") or ""), 42) for item in tender_notices[:3])
+        tender_status = "likely"
+        tender_label = "공고 확인"
+        tender_evidence = (
+            f"OpenDART 외부감사관련 공시목록에서 공개입찰/제안요청/선임공고 신호 {len(tender_notices)}건이 확인됩니다. "
+            f"{tender_labels}"
+        )
+        tender_action = "공고 원문에서 제안서 제출기한, 참가자격, 평가기준, 감사위원회 의결일, 접수처를 확인하세요."
+    else:
+        tender_status = "review"
+        tender_label = "외부 검색 필요"
+        tender_evidence = (
+            "OpenDART 외부감사관련 공시목록만으로는 공개입찰/제안요청 공고를 확인하지 못했습니다. "
+            "주요 상장사는 회사 홈페이지, IR 공지, 구매/입찰 게시판에 공고를 올리는 경우가 많습니다."
+        )
+        tender_action = "회사명과 '외부감사인 선정 입찰', '회계감사인 제안요청', '외부감사인 선임 공고'를 함께 검색하세요."
+    rules.append(
+        audit_rule_card(
+            "auditor_tender_notice",
+            "공개입찰/제안요청 공고",
+            tender_status,
+            tender_label,
+            tender_evidence,
+            tender_action,
+            ["external_audit_decree_13", "fss_2026_appointment", "fsc_accounting_reform"],
         )
     )
 
@@ -3026,8 +3109,17 @@ def build_demo_report() -> dict[str, Any]:
         "corp_cls": payload["corp_cls"],
     }
     executives = demo_executives()
+    tender_notices = demo_tender_notices(corp)
     analysis = analyze_history(corp, history, date.today().year)
-    attach_event_schedule(corp, {}, analysis, as_of=date.today(), executives=executives, special_issues=[])
+    attach_event_schedule(
+        corp,
+        {},
+        analysis,
+        as_of=date.today(),
+        executives=executives,
+        special_issues=[],
+        tender_notices=tender_notices,
+    )
     coverage = build_coverage_summary(
         history,
         history,
@@ -3064,6 +3156,7 @@ def build_demo_report() -> dict[str, Any]:
         },
         "audit_disclosures": [],
         "special_issues": [],
+        "tender_notices": tender_notices,
         "coverage": coverage,
         "service_contracts": [],
         "executives": executives,
@@ -3132,6 +3225,24 @@ def demo_executives() -> list[dict[str, Any]]:
         },
     ]
     return rank_executive_rows([normalize_executive_row(row, 2025) for row in rows])
+
+
+def demo_tender_notices(corp: dict[str, str]) -> list[dict[str, Any]]:
+    return [
+        {
+            "issue_type": "공개입찰 / 제안요청",
+            "corp_code": corp.get("corp_code", ""),
+            "corp_name": corp.get("corp_name", ""),
+            "report_nm": "2026~2028 사업연도 외부감사인 선정 입찰 공고",
+            "flr_nm": corp.get("corp_name", ""),
+            "rcept_no": "",
+            "rcept_dt": "20250815",
+            "rcept_url": "",
+            "source_kind": "demo_fixture",
+            "source_detail": "데모 데이터",
+            "source_note": "실서비스에서는 OpenDART 공시목록과 회사 홈페이지/IR 공고 검색을 병행해야 합니다.",
+        }
+    ]
 
 
 def render_report(payload: dict[str, Any], output_format: str) -> str:
@@ -3345,6 +3456,32 @@ def render_markdown(payload: dict[str, Any]) -> str:
                 )
                 + " |"
         )
+
+    tender_notices = payload.get("tender_notices", [])
+    if tender_notices:
+        lines.extend(
+            [
+                "",
+                "## 공개입찰·제안요청 공고",
+                "",
+                "| 접수일 | 유형 | 공고명 | 제출인 | 출처 |",
+                "| --- | --- | --- | --- | --- |",
+            ]
+        )
+        for row in tender_notices:
+            lines.append(
+                "| "
+                + " | ".join(
+                    [
+                        clean_md(row.get("rcept_dt", "")),
+                        clean_md(row.get("issue_type", "")),
+                        clean_md(row.get("report_nm", "")),
+                        clean_md(row.get("flr_nm", "")),
+                        clean_md(markdown_filing_label(row)),
+                    ]
+                )
+                + " |"
+            )
 
     contracts = payload.get("service_contracts", [])
     if contracts:
@@ -3861,6 +3998,7 @@ INDEX_HTML = r"""<!doctype html>
         <table><thead><tr><th>사업연도</th><th>감사인</th><th>의견</th><th>출처</th><th>보고서</th></tr></thead>
         <tbody>${(data.history || []).map(row => `<tr><td>${esc(row.bsns_year)}</td><td>${esc(row.adtor)}</td><td>${esc(row.adt_opinion || "-")}</td><td>${esc(row.source_detail || "-")}<small>${esc(row.source_note || "")}</small></td><td>${filingLink(row)}</td></tr>`).join("")}</tbody></table>
         ${renderServiceContracts(data)}
+        ${renderTenderNotices(data)}
         ${renderSpecialIssues(data)}
         ${renderCoverage(data)}
       `;
@@ -3980,6 +4118,14 @@ INDEX_HTML = r"""<!doctype html>
       return `<h2 style="margin-top:16px;">특이사항 공시</h2>
         <table><thead><tr><th>접수일</th><th>유형</th><th>보고서명</th><th>제출인</th><th>원문</th></tr></thead>
         <tbody>${issues.map(row => `<tr><td>${esc(row.rcept_dt)}</td><td>${esc(row.issue_type)}</td><td>${esc(row.report_nm)}</td><td>${esc(row.flr_nm)}</td><td>${filingLink(row)}</td></tr>`).join("")}</tbody></table>`;
+    }
+
+    function renderTenderNotices(data) {
+      const notices = data.tender_notices || [];
+      if (!notices.length) return "";
+      return `<h2 style="margin-top:16px;">공개입찰·제안요청 공고</h2>
+        <table><thead><tr><th>접수일</th><th>유형</th><th>공고명</th><th>제출인</th><th>출처</th></tr></thead>
+        <tbody>${notices.map(row => `<tr><td>${esc(row.rcept_dt || "-")}</td><td>${esc(row.issue_type || "-")}</td><td>${esc(row.report_nm || "-")}<small>${esc(row.source_note || "")}</small></td><td>${esc(row.flr_nm || "-")}</td><td>${filingLink(row)}</td></tr>`).join("")}</tbody></table>`;
     }
 
     function filingLink(row) {
