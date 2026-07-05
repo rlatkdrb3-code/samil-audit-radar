@@ -3491,32 +3491,6 @@ def render_markdown(payload: dict[str, Any]) -> str:
             ]
         )
 
-        rules = analysis.get("applicable_rules", [])
-        if rules:
-            lines.extend(
-                [
-                    "",
-                    "## 적용 기준 판단",
-                    "",
-                    "| 기준 | 판단 | 근거 | 확인사항 | 출처 |",
-                    "| --- | --- | --- | --- | --- |",
-                ]
-            )
-            for rule in rules:
-                lines.append(
-                    "| "
-                    + " | ".join(
-                        [
-                            clean_md(rule.get("title", "")),
-                            clean_md(rule.get("judgement", "")),
-                            clean_md(shorten(rule.get("evidence", ""), 120)),
-                            clean_md(shorten(rule.get("next_action", ""), 120)),
-                            clean_md(source_labels(rule.get("sources", []))),
-                        ]
-                    )
-                    + " |"
-                )
-
         schedule = analysis.get("event_schedule", [])
         if schedule:
             lines.extend(
@@ -3959,22 +3933,6 @@ INDEX_HTML = r"""<!doctype html>
     .timeline-body strong { display: block; font-size: 14px; line-height: 1.35; }
     .timeline-body p { margin: 5px 0 0; color: #29425f; line-height: 1.45; }
     .timeline-body small { display: block; margin-top: 5px; color: var(--muted); line-height: 1.4; }
-    .rule-section { border: 1px solid #b9d5ff; border-radius: 8px; background: #f8fbff; padding: 14px; margin-bottom: 14px; }
-    .rule-section h3 { margin: 0 0 10px; font-size: 15px; }
-    .rule-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 10px; }
-    .rule-card { border: 1px solid #cfe0f6; border-left: 4px solid var(--brand); border-radius: 6px; padding: 12px; background: #fff; min-width: 0; }
-    .rule-card.warning { border-left-color: #dc2626; background: #fff7f7; }
-    .rule-card.review { border-left-color: #ca8a04; background: #fffbeb; }
-    .rule-card.likely { border-left-color: var(--accent); background: var(--accent-soft); }
-    .rule-card.not_applicable { border-left-color: #94a3b8; background: #f8fafc; }
-    .rule-head { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
-    .rule-head strong { font-size: 14px; line-height: 1.35; }
-    .rule-status { border: 1px solid #b9d5ff; border-radius: 999px; padding: 3px 7px; font-size: 11px; font-weight: 800; color: var(--brand-dark); background: var(--brand-soft); white-space: nowrap; }
-    .rule-card.warning .rule-status { color: #b91c1c; border-color: #fecaca; background: #fee2e2; }
-    .rule-card.review .rule-status { color: #92400e; border-color: #fde68a; background: #fef3c7; }
-    .rule-card.likely .rule-status { color: #0e7490; border-color: #a5e3ee; background: #ecfeff; }
-    .rule-card.not_applicable .rule-status { color: #475569; border-color: #cbd5e1; background: #f1f5f9; }
-    .rule-card p { margin: 8px 0 0; color: #29425f; line-height: 1.45; }
     .source-links { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
     .source-link { border: 1px solid #b9d5ff; border-radius: 999px; padding: 4px 8px; background: #fff; font-size: 11px; line-height: 1.2; }
     .recommendation { border: 1px solid #96c4ff; border-left: 4px solid #0f3f88; background: #f8fbff; border-radius: 6px; padding: 14px; margin-bottom: 14px; }
@@ -4120,7 +4078,6 @@ INDEX_HTML = r"""<!doctype html>
           <div class="metric"><span>남은 기간</span><strong>${esc(next.dday_label || "-")}</strong></div>
         </div>
         ${renderPrimaryDecision(data)}
-        ${renderApplicableRules(a)}
         ${renderAuditTimeline(a)}
         ${renderExecutives(data)}
         <h2>감사인 이력</h2>
@@ -4144,22 +4101,6 @@ INDEX_HTML = r"""<!doctype html>
           <div class="decision-block"><span>감사인</span><strong>${esc(analysis.current_auditor || "-")}</strong><p>${esc(analysis.latest_business_year || "-")} 사업연도 기준 · 연속 ${esc(analysis.consecutive_years || "-")}년</p></div>
           <div class="decision-block"><span>관련 기준</span><strong>${esc(next.title || "-")}</strong><p>${esc(next.basis || "")}</p>${renderSources(next.sources || [])}</div>
           <div class="decision-block"><span>시기</span><strong>${esc(next.event_date || "-")} · ${esc(next.dday_label || "-")}</strong><p>${esc(next.detail || "")}</p></div>
-        </div>
-      </div>`;
-    }
-
-    function renderApplicableRules(analysis) {
-      const rules = analysis.applicable_rules || [];
-      if (!rules.length) return "";
-      return `<div class="rule-section">
-        <h3>적용 기준 판단</h3>
-        <div class="rule-grid">
-          ${rules.map(rule => `<div class="rule-card ${esc(rule.status || "review")}">
-            <div class="rule-head"><strong>${esc(rule.title || "-")}</strong><span class="rule-status">${esc(rule.judgement || "-")}</span></div>
-            <p>${esc(rule.evidence || "")}</p>
-            <p><strong>확인사항</strong> ${esc(rule.next_action || "")}</p>
-            ${renderSources(rule.sources || [])}
-          </div>`).join("")}
         </div>
       </div>`;
     }
