@@ -1432,7 +1432,7 @@ def attach_hourly_fee_metrics(row: dict[str, Any]) -> None:
     row["contract_hourly_fee"] = hourly_fee_display(contract_fee, contract_time)
     row["actual_hourly_fee"] = hourly_fee_display(actual_fee, actual_time)
     if row["contract_hourly_fee"] or row["actual_hourly_fee"]:
-        row["hourly_fee_note"] = "보수는 DART 감사용역 보수 입력값을 원/시간으로 환산했습니다."
+        row["hourly_fee_note"] = "보수는 DART 감사용역 보수 입력값을 기준으로 산출했습니다."
 
 
 def hourly_fee_display(fee_value: Any, time_value: Any) -> str:
@@ -1440,7 +1440,7 @@ def hourly_fee_display(fee_value: Any, time_value: Any) -> str:
     hours = parse_numeric_value(time_value)
     if fee_amount is None or hours is None or hours <= 0:
         return ""
-    krw_amount = fee_amount * fee_unit_multiplier(fee_value, fee_amount)
+    krw_amount = fee_amount * fee_unit_multiplier(fee_value)
     return format_krw_per_hour(krw_amount / hours)
 
 
@@ -1457,25 +1457,32 @@ def parse_numeric_value(value: Any) -> float | None:
         return None
 
 
-def fee_unit_multiplier(value: Any, amount: float) -> int:
+def fee_unit_multiplier(value: Any) -> int:
     text = re.sub(r"\s+", "", str(value or ""))
     if "억원" in text:
         return 100_000_000
     if "백만원" in text or "백만" in text:
         return 1_000_000
+    if "만원" in text:
+        return 10_000
     if "천원" in text:
         return 1_000
     if "원" in text:
         return 1
-    return 1 if amount >= 1_000_000 else 1_000_000
+    return 1_000
 
 
 def format_krw_per_hour(value: float) -> str:
     if value >= 1_000_000:
-        return f"{value / 1_000_000:,.1f}백만원/시간"
-    if value >= 10_000:
-        return f"{round(value / 100) * 100:,.0f}원/시간"
+        return f"{format_scaled_amount(value / 1_000_000)}백만원/시간"
+    if value >= 1_000:
+        return f"{format_scaled_amount(value / 1_000)}천원/시간"
     return f"{value:,.0f}원/시간"
+
+
+def format_scaled_amount(value: float) -> str:
+    text = f"{value:,.1f}"
+    return text.rstrip("0").rstrip(".")
 
 
 def period_term_number(value: Any) -> int | None:
