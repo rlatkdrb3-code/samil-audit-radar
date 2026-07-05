@@ -1440,7 +1440,7 @@ def hourly_fee_display(fee_value: Any, time_value: Any) -> str:
     hours = parse_numeric_value(time_value)
     if fee_amount is None or hours is None or hours <= 0:
         return ""
-    krw_amount = fee_amount * fee_unit_multiplier(fee_value)
+    krw_amount = fee_amount * fee_unit_multiplier(fee_value, fee_amount, hours)
     return format_krw_per_hour(krw_amount / hours)
 
 
@@ -1457,7 +1457,7 @@ def parse_numeric_value(value: Any) -> float | None:
         return None
 
 
-def fee_unit_multiplier(value: Any) -> int:
+def fee_unit_multiplier(value: Any, amount: float, hours: float) -> int:
     text = re.sub(r"\s+", "", str(value or ""))
     if "억원" in text:
         return 100_000_000
@@ -1469,6 +1469,19 @@ def fee_unit_multiplier(value: Any) -> int:
         return 1_000
     if "원" in text:
         return 1
+    return infer_unlabeled_fee_multiplier(amount, hours)
+
+
+def infer_unlabeled_fee_multiplier(amount: float, hours: float) -> int:
+    if hours <= 0:
+        return 1_000
+    # OpenDART audit-fee rows may omit whether a bare number is in KRW thousands or KRW millions.
+    for multiplier in (1_000, 1_000_000):
+        hourly = amount * multiplier / hours
+        if 10_000 <= hourly <= 1_500_000:
+            return multiplier
+    if amount * 1_000 / hours < 1_000:
+        return 1_000_000
     return 1_000
 
 
