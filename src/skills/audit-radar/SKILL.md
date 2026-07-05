@@ -45,7 +45,7 @@ The tool reads the DART API key from `DART_API_KEY`, `OPEN_DART_API_KEY`, `OPEND
 
 Always label timing analysis as an estimate. Public DART data does not always reveal whether an auditor was freely appointed, periodically designated, deferred, or designated for another reason.
 
-High-confidence statements:
+Strongly supported statements:
 
 - Current auditor shown in the latest available annual report.
 - Recent auditor names and audit opinions shown in OpenDART annual-report API results.
@@ -54,13 +54,13 @@ High-confidence statements:
 - Executive status fields when present in the annual report API response.
 - Public notice existence when a matching OpenDART filing or company notice URL is found.
 
-Medium-confidence statements:
+Inference-based statements:
 
 - Audit committee, statutory auditor, outside-director, or CEO relevance inferred from executive position/duty/major-career text.
 - Special filing flags inferred from audit-related disclosure titles.
 - Tender or proposal-request classification inferred from disclosure-title keywords.
 
-Lower-confidence statements:
+Statements that need follow-up:
 
 - Whether the current auditor is freely appointed or designated.
 - Whether the current auditor was designated for periodic designation, split designation, penalty designation, or another reason.
@@ -82,7 +82,7 @@ Lead with:
 - 감사용역 보수, 감사시간, 시간당 보수 when available
 - 외부감사인 입찰/선임 공고 확인 여부 and URL when available
 - 임원 and 감사위원회-related signals when available
-- confidence level and limitations
+- public-data limitations and follow-up checks
 
 Then show:
 

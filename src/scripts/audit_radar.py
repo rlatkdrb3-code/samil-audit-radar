@@ -3498,8 +3498,8 @@ def render_markdown(payload: dict[str, Any]) -> str:
                     "",
                     "## 관련 기준별 일정",
                     "",
-                    "| 순서 | 예상일 | D-day | 사업연도 | 이벤트 | 근거 | 신뢰도 | 출처 |",
-                    "| --- | --- | --- | --- | --- | --- | --- | --- |",
+                    "| 순서 | 예상일 | D-day | 사업연도 | 이벤트 | 근거 | 출처 |",
+                    "| --- | --- | --- | --- | --- | --- | --- |",
                 ]
             )
             for item in schedule:
@@ -3513,7 +3513,6 @@ def render_markdown(payload: dict[str, Any]) -> str:
                             clean_md(item.get("fiscal_year", "")),
                             clean_md(item.get("title", "")),
                             clean_md(shorten(item.get("basis", ""), 120)),
-                            clean_md(item.get("confidence", "")),
                             clean_md(source_labels(item.get("sources", []))),
                         ]
                     )
@@ -4120,7 +4119,7 @@ INDEX_HTML = r"""<!doctype html>
             <div class="timeline-body">
               <strong>${esc(row.order || "")}. ${esc(row.title || "-")}</strong>
               <p>${esc(row.detail || "")}</p>
-              <small>${esc(row.basis || "")} · 신뢰도 ${esc(row.confidence || "-")}</small>
+              <small>${esc(row.basis || "")}</small>
               ${renderSources(row.sources || [])}
             </div>
           </div>`).join("")}
