@@ -1,5 +1,5 @@
 {
-  "name": "audit-lead-radar",
+  "name": "audit-appointment-radar",
   "version": "0.1.0",
   "description": "Monitor Korean listed companies' external auditor history, expected auditor-change timing, executive disclosures, audit fee/time data, and public auditor appointment notices using OpenDART.",
   "author": {
