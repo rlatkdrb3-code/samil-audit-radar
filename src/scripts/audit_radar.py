@@ -60,6 +60,43 @@ CORP_CLASS_LABELS = {
     "E": "기타",
 }
 LISTED_CORP_CLASSES = {"Y", "K", "N"}
+AUDIT_RULE_SOURCES = {
+    "external_audit_act_9": {
+        "label": "외감법 제9조",
+        "title": "감사인의 자격 제한 등",
+        "url": "https://www.law.go.kr/LSW//lsLawLinkInfo.do?chrClsCd=010202&lsId=001701&lsJoLnkSeq=1001153472&print=print",
+    },
+    "external_audit_act_10": {
+        "label": "외감법 제10조",
+        "title": "감사인의 선임",
+        "url": "https://www.law.go.kr/lsLawLinkInfo.do?chrClsCd=010202&lsJoLnkSeq=900643609",
+    },
+    "external_audit_act_11": {
+        "label": "외감법 제11조",
+        "title": "증권선물위원회에 의한 감사인 지정 등",
+        "url": "https://www.law.go.kr/lsLawLinkInfo.do?chrClsCd=010202&lsJoLnkSeq=900643907",
+    },
+    "external_audit_act_13": {
+        "label": "외감법 제13조",
+        "title": "감사인의 해임",
+        "url": "https://www.law.go.kr/lsLawLinkInfo.do?chrClsCd=010202&lsJoLnkSeq=900177856",
+    },
+    "external_audit_decree_13": {
+        "label": "외감법 시행령 제13조",
+        "title": "감사인 선정 등",
+        "url": "https://www.law.go.kr/LSW//lumLsLinkPop.do?chrClsCd=010202&lspttninfSeq=149564",
+    },
+    "external_audit_decree_16": {
+        "label": "외감법 시행령 제16조",
+        "title": "감사인 지정의 기준",
+        "url": "https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=271155",
+    },
+    "fss_2026_appointment": {
+        "label": "금감원 2026 선임 유의사항",
+        "title": "2026년 외부감사인 선임시 유의사항 안내",
+        "url": "https://eiec.kdi.re.kr/policy/materialView.do?num=273968",
+    },
+}
 BIG4_ALIASES = {
     "samil": "삼일",
     "pwc": "삼일",
@@ -811,7 +848,14 @@ def build_report(
     service_history = fetch_service_contracts(corp["corp_code"], config, years=min(years, 5))
     executive_history = fetch_executive_status(corp["corp_code"], config, years=min(years, 3))
     analysis = analyze_history(corp, audit_history, config.current_year)
-    attach_event_schedule(corp, company_profile, analysis, as_of=date.today())
+    attach_event_schedule(
+        corp,
+        company_profile,
+        analysis,
+        as_of=date.today(),
+        executives=executive_history,
+        special_issues=disclosure_bundle["special_issues"],
+    )
     if disclosure_bundle["special_issues"] and analysis.get("status") == "ok":
         analysis.setdefault("follow_up", []).insert(
             0,
@@ -1540,10 +1584,233 @@ def attach_event_schedule(
     analysis: dict[str, Any],
     *,
     as_of: date,
+    executives: list[dict[str, Any]] | None = None,
+    special_issues: list[dict[str, Any]] | None = None,
 ) -> None:
+    analysis["applicable_rules"] = build_audit_applicability(
+        corp,
+        company_profile,
+        analysis,
+        as_of=as_of,
+        executives=executives or [],
+        special_issues=special_issues or [],
+    )
     schedule = build_audit_event_schedule(corp, company_profile, analysis, as_of=as_of)
     analysis["event_schedule"] = schedule
     analysis["next_timeline_event"] = next_timeline_event(schedule)
+
+
+def build_audit_applicability(
+    corp: dict[str, str],
+    company_profile: dict[str, Any],
+    analysis: dict[str, Any],
+    *,
+    as_of: date,
+    executives: list[dict[str, Any]],
+    special_issues: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if analysis.get("status") != "ok":
+        return []
+
+    corp_cls = str(analysis.get("corp_class") or corp.get("corp_cls") or "").strip()
+    corp_label = CORP_CLASS_LABELS.get(corp_cls, "알 수 없음")
+    is_listed = corp_cls in LISTED_CORP_CLASSES
+    subject = analysis.get("periodic_subject_estimate") or {}
+    event = analysis.get("estimated_event") or {}
+    current_run = analysis.get("current_run") or {}
+    fiscal_end_month = resolve_fiscal_end_month(corp, company_profile)
+    latest_year = int_or_zero(analysis.get("latest_business_year"))
+    next_fiscal_year = latest_year + 1 if latest_year else as_of.year
+    appointment_date = appointment_deadline(next_fiscal_year, fiscal_end_month)
+    audit_committee = audit_committee_evidence(executives)
+    rules: list[dict[str, Any]] = []
+
+    if is_listed:
+        rules.append(
+            audit_rule_card(
+                "listed_registered_auditor",
+                "상장회사 감사인 자격",
+                "applies",
+                "적용",
+                f"OpenDART 법인구분: {corp_label}. 상장회사 감사인 자격 제한을 적용합니다.",
+                "후보 감사인이 금융위원회 등록 상장회사 감사인인지 확인하세요.",
+                ["external_audit_act_9", "fss_2026_appointment"],
+            )
+        )
+        rules.append(
+            audit_rule_card(
+                "three_year_same_auditor",
+                "3개 사업연도 동일 감사인 선임",
+                "applies",
+                "적용",
+                f"{corp_label} 상장회사이므로 동일 감사인을 연속 3개 사업연도로 선임하는 기준을 적용합니다.",
+                "3년 계약 구간의 시작·종료연도와 재선임/교체/지정 여부를 원문 공시로 대조하세요.",
+                ["external_audit_act_10", "fss_2026_appointment"],
+            )
+        )
+    else:
+        rules.append(
+            audit_rule_card(
+                "listed_scope",
+                "상장회사 기준",
+                "not_applicable",
+                "분석 제외",
+                f"OpenDART 법인구분이 {corp_label}로 확인되어 현재 상장회사 전용 판단 범위에서 벗어납니다.",
+                "비상장·금융회사·대형비상장 기준은 별도 체크리스트로 확인하세요.",
+                ["external_audit_act_10"],
+            )
+        )
+
+    rules.append(
+        audit_rule_card(
+            "appointment_deadline",
+            "감사인 선임기한",
+            "review",
+            "기본 적용·예외 확인",
+            (
+                f"{next_fiscal_year} 사업연도 기준 기본 선임기한은 {appointment_date.isoformat()}로 계산됩니다. "
+                "다만 감사위원회 의무설치 회사는 사업연도 개시 전 선임 기준을 우선 확인해야 합니다."
+            ),
+            "정관, 지배구조보고서, 감사위원회 설치 의무 여부를 확인해 실제 마감일을 확정하세요.",
+            ["external_audit_act_10", "fss_2026_appointment"],
+        )
+    )
+
+    if audit_committee:
+        selection_evidence = f"{audit_committee} 감사위원회 설치 회사는 감사위원회가 외부감사인을 선정하는 절차를 우선 검토합니다."
+        selection_action = "감사위원회 의사록, 후보평가표, 대면회의 기록과 선임보고 자료를 확인하세요."
+        selection_status = "likely"
+        selection_label = "감사위원회 절차 가능"
+    else:
+        selection_evidence = (
+            "공개 임원 데이터만으로 감사위원회 설치 여부를 확정하지 못했습니다. "
+            "감사위원회 미설치 상장회사라면 감사가 감사인선임위원회 승인을 받아 선정하는 절차를 확인해야 합니다."
+        )
+        selection_action = "사업보고서 지배구조, 감사위원회/감사 구성, 감사인선임위원회 승인 여부를 확인하세요."
+        selection_status = "review"
+        selection_label = "확인 필요"
+    rules.append(
+        audit_rule_card(
+            "selection_body",
+            "감사인 선정권자",
+            selection_status,
+            selection_label,
+            selection_evidence,
+            selection_action,
+            ["external_audit_act_10", "external_audit_decree_13"],
+        )
+    )
+
+    rules.append(
+        audit_rule_card(
+            "selection_criteria",
+            "선정 기준 문서화",
+            "applies" if is_listed else "review",
+            "적용" if is_listed else "확인 필요",
+            "감사시간, 감사인력, 감사보수, 감사계획의 적정성 및 감사인의 독립성·전문성을 기준으로 문서화해야 합니다.",
+            "후보별 감사계획/보수/투입시간 비교표와 전기감사인 의견진술 내용을 선임 파일에 묶어 확인하세요.",
+            ["external_audit_decree_13", "fss_2026_appointment"],
+        )
+    )
+
+    length = int_or_zero(current_run.get("length"))
+    if subject.get("status") == "likely_subject" and length >= PERIODIC_APPOINTMENT_YEARS:
+        periodic_status = "warning"
+        periodic_label = "주기적 지정 후보"
+        periodic_evidence = (
+            f"상장회사이고 현재 감사인이 공개 이력상 {length}개 사업연도 연속 확인되어 "
+            "6년 자유선임 후 지정감사 검토 기준에 도달했거나 임박했을 가능성이 큽니다."
+        )
+    elif subject.get("status") == "likely_subject":
+        periodic_status = "likely"
+        periodic_label = "모니터링"
+        periodic_evidence = (
+            f"상장회사로 주기적 지정 제도 적용 대상 가능성이 높습니다. "
+            f"현재 공개 이력상 동일 감사인 연속 {length}개 사업연도로 계산됩니다."
+        )
+    else:
+        periodic_status = "review"
+        periodic_label = "예외 확인"
+        periodic_evidence = subject.get("reason") or "주기적 지정 적용 대상 여부를 별도 확인해야 합니다."
+    rules.append(
+        audit_rule_card(
+            "periodic_designation",
+            "주기적 지정 6년+3년",
+            periodic_status,
+            periodic_label,
+            periodic_evidence,
+            "금감원 지정 사전/본통지, 유예·분산지정, 지정감사 종료연도 여부를 원문 자료로 확인하세요.",
+            ["external_audit_act_11", "external_audit_decree_16"],
+        )
+    )
+
+    if event.get("type") == "possible_designated_cycle":
+        rules.append(
+            audit_rule_card(
+                "designation_exit",
+                "지정감사 종료 후 자유선임 전환",
+                "review",
+                "확인 필요",
+                "이전 감사인이 6년 이상 이어진 뒤 현재 감사인으로 바뀐 패턴이라 현재 감사인이 지정감사인일 수 있습니다.",
+                "지정감사 3년 종료 여부와 지정 사업연도 이후 최초 사업연도 전기 지정감사인 배제 규정을 확인하세요.",
+                ["external_audit_act_11"],
+            )
+        )
+
+    if special_issues:
+        issue_labels = ", ".join(short(str(item.get("issue_type") or item.get("report_nm") or ""), 24) for item in special_issues[:3])
+        rules.append(
+            audit_rule_card(
+                "designation_trigger_review",
+                "직권지정 사유 점검",
+                "warning",
+                "주의",
+                f"감사보고서 제출 지연·정정 등 특이공시 {len(special_issues)}건이 확인되었습니다. {issue_labels}",
+                "해당 공시가 감사인 지정 사유, 재무제표 제출의무 위반, 감사시간 미달 등과 연결되는지 원문으로 확인하세요.",
+                ["external_audit_act_11", "external_audit_act_13"],
+            )
+        )
+
+    return rules
+
+
+def audit_rule_card(
+    rule_id: str,
+    title: str,
+    status: str,
+    judgement: str,
+    evidence: str,
+    next_action: str,
+    source_ids: list[str],
+) -> dict[str, Any]:
+    return {
+        "id": rule_id,
+        "title": title,
+        "status": status,
+        "judgement": judgement,
+        "evidence": evidence,
+        "next_action": next_action,
+        "sources": source_refs(source_ids),
+    }
+
+
+def source_refs(source_ids: list[str]) -> list[dict[str, str]]:
+    refs = []
+    for source_id in source_ids:
+        source = AUDIT_RULE_SOURCES.get(source_id)
+        if not source:
+            continue
+        refs.append({"id": source_id, **source})
+    return refs
+
+
+def audit_committee_evidence(executives: list[dict[str, Any]]) -> str:
+    for row in executives:
+        text = " ".join(str(row.get(key, "")) for key in ("ofcps", "chrg_job", "main_career", "rm"))
+        if "감사위원" in text or "감사위원회" in text:
+            name = str(row.get("nm", "")).strip()
+            return f"임원 현황에서 {name or '임원'}의 감사위원회 관련 문구가 확인됩니다."
+    return ""
 
 
 def build_audit_event_schedule(
@@ -1640,6 +1907,7 @@ def build_three_year_term_event(
         ),
         basis="주권상장법인 등은 연속 3개 사업연도 동일 감사인 선임 의무가 있습니다.",
         confidence="medium",
+        source_ids=["external_audit_act_10", "fss_2026_appointment"],
         priority_order=20,
     )
 
@@ -1677,6 +1945,7 @@ def build_designation_exit_event(
         ),
         basis="주기적 지정은 통상 3개 사업연도 지정감사 이후 자유선임 전환 검토가 필요합니다.",
         confidence="medium",
+        source_ids=["external_audit_act_11", "external_audit_decree_16"],
         priority_order=10,
     )
 
@@ -1719,6 +1988,7 @@ def build_periodic_designation_event(
         ),
         basis="OpenDART 감사인 이력에는 자유선임/지정 구분이 직접 표시되지 않아 동일 감사인 연속연차를 기준으로 추정합니다.",
         confidence=confidence,
+        source_ids=["external_audit_act_11", "external_audit_decree_16"],
         priority_order=30 if base_years == PERIODIC_APPOINTMENT_YEARS else 40,
     )
 
@@ -1733,6 +2003,7 @@ def audit_timeline_event(
     detail: str,
     basis: str,
     confidence: str,
+    source_ids: list[str],
     priority_order: int,
 ) -> dict[str, Any]:
     return {
@@ -1746,6 +2017,7 @@ def audit_timeline_event(
         "detail": detail,
         "basis": basis,
         "confidence": confidence,
+        "sources": source_refs(source_ids),
         "priority_order": priority_order,
     }
 
@@ -2755,7 +3027,7 @@ def build_demo_report() -> dict[str, Any]:
     }
     executives = demo_executives()
     analysis = analyze_history(corp, history, date.today().year)
-    attach_event_schedule(corp, {}, analysis, as_of=date.today())
+    attach_event_schedule(corp, {}, analysis, as_of=date.today(), executives=executives, special_issues=[])
     coverage = build_coverage_summary(
         history,
         history,
@@ -2988,8 +3260,35 @@ def render_markdown(payload: dict[str, Any]) -> str:
                 f"- 교체/검토 시기: **{next_event.get('event_date', '-')}**",
                 f"- 남은 기간: **{next_event.get('dday_label', '-')}**",
                 f"- 기준 근거: {next_event.get('basis', '')}",
+                f"- 기준 출처: {source_labels(next_event.get('sources', [])) or '-'}",
             ]
         )
+
+        rules = analysis.get("applicable_rules", [])
+        if rules:
+            lines.extend(
+                [
+                    "",
+                    "## 적용 기준 판단",
+                    "",
+                    "| 기준 | 판단 | 근거 | 확인사항 | 출처 |",
+                    "| --- | --- | --- | --- | --- |",
+                ]
+            )
+            for rule in rules:
+                lines.append(
+                    "| "
+                    + " | ".join(
+                        [
+                            clean_md(rule.get("title", "")),
+                            clean_md(rule.get("judgement", "")),
+                            clean_md(shorten(rule.get("evidence", ""), 120)),
+                            clean_md(shorten(rule.get("next_action", ""), 120)),
+                            clean_md(source_labels(rule.get("sources", []))),
+                        ]
+                    )
+                    + " |"
+                )
 
         schedule = analysis.get("event_schedule", [])
         if schedule:
@@ -2998,8 +3297,8 @@ def render_markdown(payload: dict[str, Any]) -> str:
                     "",
                     "## 관련 기준별 일정",
                     "",
-                    "| 순서 | 예상일 | D-day | 사업연도 | 이벤트 | 근거 | 신뢰도 |",
-                    "| --- | --- | --- | --- | --- | --- | --- |",
+                    "| 순서 | 예상일 | D-day | 사업연도 | 이벤트 | 근거 | 신뢰도 | 출처 |",
+                    "| --- | --- | --- | --- | --- | --- | --- | --- |",
                 ]
             )
             for item in schedule:
@@ -3014,6 +3313,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
                             clean_md(item.get("title", "")),
                             clean_md(shorten(item.get("basis", ""), 120)),
                             clean_md(item.get("confidence", "")),
+                            clean_md(source_labels(item.get("sources", []))),
                         ]
                     )
                     + " |"
@@ -3095,6 +3395,20 @@ def render_markdown(payload: dict[str, Any]) -> str:
 
 def clean_md(value: Any) -> str:
     return str(value or "").replace("|", "\\|").replace("\n", " ").strip()
+
+
+def source_labels(sources: Any) -> str:
+    labels = []
+    for source in sources or []:
+        if not isinstance(source, dict):
+            continue
+        label = str(source.get("label") or source.get("title") or "").strip()
+        url = str(source.get("url") or "").strip()
+        if label and url:
+            labels.append(f"{label}({url})")
+        elif label:
+            labels.append(label)
+    return ", ".join(labels)
 
 
 def contract_period_display(row: dict[str, Any]) -> str:
@@ -3379,6 +3693,24 @@ INDEX_HTML = r"""<!doctype html>
     .timeline-body strong { display: block; font-size: 14px; line-height: 1.35; }
     .timeline-body p { margin: 5px 0 0; color: #29425f; line-height: 1.45; }
     .timeline-body small { display: block; margin-top: 5px; color: var(--muted); line-height: 1.4; }
+    .rule-section { border: 1px solid #b9d5ff; border-radius: 8px; background: #f8fbff; padding: 14px; margin-bottom: 14px; }
+    .rule-section h3 { margin: 0 0 10px; font-size: 15px; }
+    .rule-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 10px; }
+    .rule-card { border: 1px solid #cfe0f6; border-left: 4px solid var(--brand); border-radius: 6px; padding: 12px; background: #fff; min-width: 0; }
+    .rule-card.warning { border-left-color: #dc2626; background: #fff7f7; }
+    .rule-card.review { border-left-color: #ca8a04; background: #fffbeb; }
+    .rule-card.likely { border-left-color: var(--accent); background: var(--accent-soft); }
+    .rule-card.not_applicable { border-left-color: #94a3b8; background: #f8fafc; }
+    .rule-head { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
+    .rule-head strong { font-size: 14px; line-height: 1.35; }
+    .rule-status { border: 1px solid #b9d5ff; border-radius: 999px; padding: 3px 7px; font-size: 11px; font-weight: 800; color: var(--brand-dark); background: var(--brand-soft); white-space: nowrap; }
+    .rule-card.warning .rule-status { color: #b91c1c; border-color: #fecaca; background: #fee2e2; }
+    .rule-card.review .rule-status { color: #92400e; border-color: #fde68a; background: #fef3c7; }
+    .rule-card.likely .rule-status { color: #0e7490; border-color: #a5e3ee; background: #ecfeff; }
+    .rule-card.not_applicable .rule-status { color: #475569; border-color: #cbd5e1; background: #f1f5f9; }
+    .rule-card p { margin: 8px 0 0; color: #29425f; line-height: 1.45; }
+    .source-links { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .source-link { border: 1px solid #b9d5ff; border-radius: 999px; padding: 4px 8px; background: #fff; font-size: 11px; line-height: 1.2; }
     .recommendation { border: 1px solid #96c4ff; border-left: 4px solid #0f3f88; background: #f8fbff; border-radius: 6px; padding: 14px; margin-bottom: 14px; }
     .recommendation h3 { margin: 0 0 10px; font-size: 15px; }
     .recommendation-score { display: grid; grid-template-columns: 112px 1fr; gap: 12px; align-items: center; }
@@ -3522,6 +3854,7 @@ INDEX_HTML = r"""<!doctype html>
           <div class="metric"><span>남은 기간</span><strong>${esc(next.dday_label || "-")}</strong></div>
         </div>
         ${renderPrimaryDecision(data)}
+        ${renderApplicableRules(a)}
         ${renderAuditTimeline(a)}
         ${renderExecutives(data)}
         <h2>감사인 이력</h2>
@@ -3542,8 +3875,24 @@ INDEX_HTML = r"""<!doctype html>
         <div class="decision-grid">
           <div class="decision-block"><span>대상 회사</span><strong>${esc(company.corp_name || "-")}</strong><p>${esc(company.stock_code || "-")} · ${esc(analysis.corp_class_label || "-")}</p></div>
           <div class="decision-block"><span>감사인</span><strong>${esc(analysis.current_auditor || "-")}</strong><p>${esc(analysis.latest_business_year || "-")} 사업연도 기준 · 연속 ${esc(analysis.consecutive_years || "-")}년</p></div>
-          <div class="decision-block"><span>관련 기준</span><strong>${esc(next.title || "-")}</strong><p>${esc(next.basis || "")}</p></div>
+          <div class="decision-block"><span>관련 기준</span><strong>${esc(next.title || "-")}</strong><p>${esc(next.basis || "")}</p>${renderSources(next.sources || [])}</div>
           <div class="decision-block"><span>시기</span><strong>${esc(next.event_date || "-")} · ${esc(next.dday_label || "-")}</strong><p>${esc(next.detail || "")}</p></div>
+        </div>
+      </div>`;
+    }
+
+    function renderApplicableRules(analysis) {
+      const rules = analysis.applicable_rules || [];
+      if (!rules.length) return "";
+      return `<div class="rule-section">
+        <h3>적용 기준 판단</h3>
+        <div class="rule-grid">
+          ${rules.map(rule => `<div class="rule-card ${esc(rule.status || "review")}">
+            <div class="rule-head"><strong>${esc(rule.title || "-")}</strong><span class="rule-status">${esc(rule.judgement || "-")}</span></div>
+            <p>${esc(rule.evidence || "")}</p>
+            <p><strong>확인사항</strong> ${esc(rule.next_action || "")}</p>
+            ${renderSources(rule.sources || [])}
+          </div>`).join("")}
         </div>
       </div>`;
     }
@@ -3564,10 +3913,16 @@ INDEX_HTML = r"""<!doctype html>
               <strong>${esc(row.order || "")}. ${esc(row.title || "-")}</strong>
               <p>${esc(row.detail || "")}</p>
               <small>${esc(row.basis || "")} · 신뢰도 ${esc(row.confidence || "-")}</small>
+              ${renderSources(row.sources || [])}
             </div>
           </div>`).join("")}
         </div>
       </div>`;
+    }
+
+    function renderSources(sources) {
+      if (!sources.length) return "";
+      return `<div class="source-links">${sources.map(source => `<a class="source-link" href="${esc(source.url || "#")}" target="_blank" rel="noreferrer">${esc(source.label || source.title || "출처")}</a>`).join("")}</div>`;
     }
 
     function renderCoverage(data) {
