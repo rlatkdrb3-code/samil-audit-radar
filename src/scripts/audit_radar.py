@@ -3340,14 +3340,20 @@ INDEX_HTML = r"""<!doctype html>
     input:focus, select:focus { outline: 2px solid rgba(37, 99, 235, 0.22); border-color: var(--brand); }
     button { background: var(--brand); color: #fff; border-color: var(--brand); cursor: pointer; font-weight: 700; }
     button:hover { background: var(--brand-dark); border-color: var(--brand-dark); }
-    .grid { display: grid; grid-template-columns: 320px 1fr; gap: 18px; align-items: start; }
     .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 18px; box-shadow: var(--shadow); }
     .search-panel { margin-bottom: 18px; }
+    .report-panel { margin-top: 18px; }
     .status { color: var(--muted); font-size: 13px; margin-top: 10px; min-height: 18px; }
-    .company { width: 100%; display: block; text-align: left; background: #fff; color: var(--ink); border: 1px solid var(--line); margin-bottom: 8px; height: auto; padding: 11px 12px; border-radius: 6px; }
+    .result-strip { display: grid; grid-template-columns: auto 1fr; gap: 12px; align-items: start; margin-top: 12px; padding-top: 12px; border-top: 1px solid #d7e5f8; }
+    .result-strip[hidden] { display: none; }
+    .result-label { color: var(--muted); font-size: 12px; font-weight: 800; line-height: 36px; white-space: nowrap; }
+    .result-list { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+    .company { min-width: 210px; max-width: 320px; display: inline-flex; flex-direction: column; align-items: flex-start; text-align: left; background: #fff; color: var(--ink); border: 1px solid var(--line); margin: 0; height: auto; min-height: 44px; padding: 9px 12px; border-radius: 6px; }
     .company:hover { border-color: var(--brand); background: var(--brand-soft); }
-    .company strong { display: block; color: #12345d; }
-    .company span { color: var(--muted); font-size: 12px; }
+    .company.selected { border-color: #0f3f88; background: var(--brand-soft); box-shadow: inset 3px 0 0 #0f3f88; }
+    .company strong { display: block; max-width: 100%; color: #12345d; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .company span { display: block; max-width: 100%; color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .empty-results { color: var(--muted); font-size: 13px; line-height: 36px; }
     .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
     .metric { border: 1px solid #cfe0f6; border-radius: 8px; padding: 12px; background: #f8fbff; min-height: 86px; }
     .metric span { display: block; color: var(--muted); font-size: 12px; }
@@ -3416,7 +3422,9 @@ INDEX_HTML = r"""<!doctype html>
     ul { margin: 8px 0 0 18px; padding: 0; }
     li { margin: 5px 0; }
     @media (max-width: 860px) {
-      .toolbar, .grid, .summary, .coverage-grid, .strategy-grid, .recommendation-score, .driver-grid, .decision-grid { grid-template-columns: 1fr; }
+      .toolbar, .result-strip, .summary, .coverage-grid, .strategy-grid, .recommendation-score, .driver-grid, .decision-grid { grid-template-columns: 1fr; }
+      .result-label { line-height: 1.2; }
+      .company { width: 100%; max-width: none; }
       .timeline-item { grid-template-columns: 1fr; }
       main { padding: 14px; }
     }
@@ -3439,17 +3447,15 @@ INDEX_HTML = r"""<!doctype html>
         <button id="searchBtn">검색</button>
       </div>
       <div class="status" id="status"></div>
+      <div class="result-strip" id="resultStrip" hidden>
+        <div class="result-label">검색 결과</div>
+        <div class="result-list" id="results"></div>
+      </div>
     </section>
-    <div class="grid" style="margin-top:16px;">
-      <section class="panel">
-        <h2>검색 결과</h2>
-        <div id="results"></div>
-      </section>
-      <section class="panel">
-        <h2>감사인 교체 시기</h2>
-        <div id="report">기업을 검색한 뒤 결과를 선택하세요.</div>
-      </section>
-    </div>
+    <section class="panel report-panel">
+      <h2>감사인 교체 시기</h2>
+      <div id="report">기업을 검색한 뒤 결과를 선택하세요.</div>
+    </section>
   </main>
   <script>
     const $ = (id) => document.getElementById(id);
@@ -3468,19 +3474,25 @@ INDEX_HTML = r"""<!doctype html>
       if (!q) return;
       $("status").textContent = "검색 중...";
       $("results").innerHTML = "";
+      $("resultStrip").hidden = true;
       try {
         const rows = await getJson(`/api/search?q=${encodeURIComponent(q)}`);
         $("status").textContent = `${rows.length}개 상장사 후보`;
-        $("results").innerHTML = rows.map(row => `<button class="company" data-code="${row.corp_code}" data-name="${row.corp_name}">
+        $("resultStrip").hidden = false;
+        $("results").innerHTML = rows.length ? rows.map(row => `<button class="company" data-code="${row.corp_code}" data-name="${row.corp_name}">
           <strong>${row.corp_name}</strong><span>고유번호 ${row.corp_code} · 종목코드 ${row.stock_code || "-"}</span>
-        </button>`).join("") || "검색 결과가 없습니다.";
+        </button>`).join("") : `<span class="empty-results">검색 결과가 없습니다.</span>`;
         document.querySelectorAll(".company").forEach(btn => btn.addEventListener("click", () => loadReport(btn.dataset.name, btn.dataset.code)));
+        if (rows.length === 1) {
+          await loadReport(rows[0].corp_name, rows[0].corp_code);
+        }
       } catch (err) {
         $("status").textContent = err.message;
       }
     }
 
     async function loadReport(name, code) {
+      document.querySelectorAll(".company").forEach(btn => btn.classList.toggle("selected", btn.dataset.code === code));
       $("status").textContent = "리포트 생성 중...";
       try {
         const years = $("years").value;
