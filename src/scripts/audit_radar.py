@@ -858,6 +858,7 @@ def build_report(
     if not is_listed_company(corp):
         raise RuntimeError("현재 버전은 코스피·코스닥·코넥스 상장사만 지원합니다.")
     structured_history = fetch_audit_history(corp["corp_code"], config, years=years)
+    annual_report_filings = fetch_annual_report_filings(corp["corp_code"], config, years=years)
     disclosure_bundle = fetch_external_audit_disclosures(corp["corp_code"], config, years=years)
     audit_history = merge_audit_sources(
         structured_history,
@@ -886,6 +887,7 @@ def build_report(
         structured_history,
         disclosure_bundle["history"],
         disclosure_bundle["special_issues"],
+        annual_report_filings,
         years=years,
         current_year=config.current_year,
         external_error=disclosure_bundle.get("error"),
@@ -922,6 +924,7 @@ def build_report(
             "external_audit_reports": disclosure_bundle["history"],
         },
         "audit_disclosures": disclosure_bundle["filings"],
+        "annual_report_filings": annual_report_filings,
         "special_issues": disclosure_bundle["special_issues"],
         "tender_notices": disclosure_bundle["tender_notices"],
         "coverage": coverage,
@@ -1024,6 +1027,53 @@ def fetch_external_audit_disclosures(
         "tender_notices": tender_notices[:20],
         "error": None,
     }
+
+
+def fetch_annual_report_filings(
+    corp_code: str,
+    config: AppConfig,
+    *,
+    years: int,
+) -> list[dict[str, Any]]:
+    start_year = max(1999, config.current_year - years - 1)
+    start_date = f"{start_year}0101"
+    end_date = date.today().strftime("%Y%m%d")
+    try:
+        filings = dart_list_filings(
+            corp_code,
+            config,
+            bgn_de=start_date,
+            end_de=end_date,
+            pblntf_ty="A",
+        )
+    except RuntimeError:
+        return []
+    annual_reports = []
+    for row in filings:
+        filing = normalize_filing_row(row)
+        report_name = re.sub(r"\s+", "", filing.get("report_nm", ""))
+        if "사업보고서" not in report_name:
+            continue
+        if any(keyword in report_name for keyword in ("분기보고서", "반기보고서")):
+            continue
+        filing["business_year"] = annual_report_business_year(filing)
+        filing["source_kind"] = "annual_report_filing"
+        filing["source_detail"] = "DART 정기공시 사업보고서 목록"
+        annual_reports.append(filing)
+    annual_reports.sort(key=lambda row: row.get("rcept_dt", ""), reverse=True)
+    return annual_reports[:years]
+
+
+def annual_report_business_year(filing: dict[str, Any]) -> str:
+    if filing.get("period_year"):
+        return str(filing.get("period_year"))
+    receipt = str(filing.get("rcept_dt", ""))
+    match = re.match(r"(20\d{2})(\d{2})(\d{2})", receipt)
+    if not match:
+        return ""
+    receipt_year = int(match.group(1))
+    receipt_month = int(match.group(2))
+    return str(receipt_year - 1 if receipt_month <= 6 else receipt_year)
 
 
 def dart_list_filings(
@@ -1218,17 +1268,24 @@ def build_coverage_summary(
     structured_history: list[dict[str, Any]],
     external_history: list[dict[str, Any]],
     special_issues: list[dict[str, Any]],
+    annual_report_filings: list[dict[str, Any]],
     *,
     years: int,
     current_year: int,
     external_error: str | None,
 ) -> dict[str, Any]:
     history_years = {str(row.get("bsns_year", "")).strip() for row in history}
+    annual_report_years = {str(row.get("business_year", "")).strip() for row in annual_report_filings if str(row.get("business_year", "")).strip()}
     recent_years = [str(year) for year in range(current_year - 1, current_year - min(years, 4), -1)]
-    missing_recent_years = [year for year in recent_years if year not in history_years]
+    annual_report_gap_years = [year for year in recent_years if year in annual_report_years and year not in history_years]
+    missing_recent_years = [year for year in recent_years if year not in history_years and year not in annual_report_years]
     notes = [
         "정기보고서 주요정보 API를 우선 사용하고, 누락 연도는 외부감사관련 감사보고서 공시목록으로 보완합니다."
     ]
+    if annual_report_gap_years:
+        notes.append(
+            "사업보고서는 확인되지만 감사인명 구조화 API에서 감사인 이력을 추출하지 못한 연도는 원문 사업보고서 또는 회사 IR 감사보고서로 보완 확인이 필요합니다."
+        )
     if missing_recent_years:
         notes.append(
             "최근 연도 중 감사인 이력이 확인되지 않은 연도는 미제출, 제출 지연, 비대상, 명칭 불일치 가능성을 구분해 원문 확인이 필요합니다."
@@ -1239,6 +1296,9 @@ def build_coverage_summary(
         "merged_rows": len(history),
         "periodic_report_api_rows": len(structured_history),
         "external_audit_report_rows": len(external_history),
+        "annual_report_rows": len(annual_report_filings),
+        "annual_report_years": sorted(annual_report_years, reverse=True),
+        "annual_report_gap_years": annual_report_gap_years,
         "special_issue_rows": len(special_issues),
         "missing_recent_years": missing_recent_years,
         "notes": notes,
@@ -3180,6 +3240,7 @@ def build_demo_report() -> dict[str, Any]:
         history,
         [],
         [],
+        [],
         years=len(history),
         current_year=date.today().year,
         external_error=None,
@@ -4137,15 +4198,20 @@ INDEX_HTML = r"""<!doctype html>
       const missing = (c.missing_recent_years || []).length
         ? `<p><strong>최근 공시 미확인 연도:</strong> ${esc(c.missing_recent_years.join(", "))}</p>`
         : "";
+      const annualGaps = (c.annual_report_gap_years || []).length
+        ? `<p><strong>사업보고서 확인·감사인 항목 미확인 연도:</strong> ${esc(c.annual_report_gap_years.join(", "))}</p>`
+        : "";
       const notes = (c.notes || []).map(note => `<li>${esc(note)}</li>`).join("");
       return `<div class="coverage">
         <div class="coverage-grid">
           <div><span>병합 이력</span><strong>${esc(c.merged_rows || 0)}건</strong></div>
           <div><span>정기보고서 API</span><strong>${esc(c.periodic_report_api_rows || 0)}건</strong></div>
+          <div><span>사업보고서 목록</span><strong>${esc(c.annual_report_rows || 0)}건</strong></div>
           <div><span>외부감사 공시</span><strong>${esc(c.external_audit_report_rows || 0)}건</strong></div>
           <div><span>특이공시</span><strong>${esc(c.special_issue_rows || 0)}건</strong></div>
         </div>
         ${missing}
+        ${annualGaps}
         ${notes ? `<ul>${notes}</ul>` : ""}
       </div>`;
     }
