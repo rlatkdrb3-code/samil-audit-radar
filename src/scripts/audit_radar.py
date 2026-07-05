@@ -32,6 +32,10 @@ DEFAULT_YEARS = 10
 MIN_YEARS = 4
 MAX_YEARS = 12
 MAX_RECOMMENDATIONS = 3
+APPOINTMENT_DEADLINE_DAYS = 45
+THREE_YEAR_APPOINTMENT_TERM = 3
+PERIODIC_APPOINTMENT_YEARS = 6
+GOVERNANCE_DEFERRAL_YEARS = 9
 RATE_LIMIT_WINDOW_SECONDS = 60
 RATE_LIMIT_MAX_REQUESTS = 30
 RESPONSE_CACHE_TTL_SECONDS = 60 * 60
@@ -807,6 +811,7 @@ def build_report(
     service_history = fetch_service_contracts(corp["corp_code"], config, years=min(years, 5))
     executive_history = fetch_executive_status(corp["corp_code"], config, years=min(years, 3))
     analysis = analyze_history(corp, audit_history, config.current_year)
+    attach_event_schedule(corp, company_profile, analysis, as_of=date.today())
     if disclosure_bundle["special_issues"] and analysis.get("status") == "ok":
         analysis.setdefault("follow_up", []).insert(
             0,
@@ -1527,6 +1532,268 @@ def build_follow_up(subject: dict[str, str], event: dict[str, Any]) -> list[str]
     if event["type"] in {"six_year_threshold_reached", "approaching_six_year_threshold"}:
         checks.append("주기적 지정 유예 또는 분산지정 적용 여부 확인")
     return checks
+
+
+def attach_event_schedule(
+    corp: dict[str, str],
+    company_profile: dict[str, Any],
+    analysis: dict[str, Any],
+    *,
+    as_of: date,
+) -> None:
+    schedule = build_audit_event_schedule(corp, company_profile, analysis, as_of=as_of)
+    analysis["event_schedule"] = schedule
+    analysis["next_timeline_event"] = next_timeline_event(schedule)
+
+
+def build_audit_event_schedule(
+    corp: dict[str, str],
+    company_profile: dict[str, Any],
+    analysis: dict[str, Any],
+    *,
+    as_of: date,
+) -> list[dict[str, Any]]:
+    if analysis.get("status") != "ok":
+        return []
+
+    current_run = analysis.get("current_run") or {}
+    previous_run = analysis.get("previous_run") or {}
+    subject = analysis.get("periodic_subject_estimate") or {}
+    event = analysis.get("estimated_event") or {}
+    fiscal_end_month = resolve_fiscal_end_month(corp, company_profile)
+    events: list[dict[str, Any]] = []
+
+    term_event = build_three_year_term_event(current_run, fiscal_end_month, as_of)
+    if term_event:
+        events.append(term_event)
+
+    designation_exit = build_designation_exit_event(
+        current_run,
+        previous_run,
+        fiscal_end_month,
+        subject,
+        event,
+        as_of,
+    )
+    if designation_exit:
+        events.append(designation_exit)
+
+    periodic_event = build_periodic_designation_event(
+        current_run,
+        fiscal_end_month,
+        subject,
+        as_of,
+        base_years=PERIODIC_APPOINTMENT_YEARS,
+        kind="periodic_designation",
+        title="주기적 지정 후보",
+        detail_suffix="6년 자유선임으로 추정되는 경우 금융당국 지정감사 후보가 됩니다.",
+    )
+    if periodic_event:
+        events.append(periodic_event)
+
+    deferred_event = build_periodic_designation_event(
+        current_run,
+        fiscal_end_month,
+        subject,
+        as_of,
+        base_years=GOVERNANCE_DEFERRAL_YEARS,
+        kind="governance_deferral",
+        title="우수기업 유예 적용 시 후보",
+        detail_suffix="회계·감사 지배구조 우수기업 유예가 인정되는 경우의 9년 자율선임 시나리오입니다.",
+    )
+    if deferred_event:
+        events.append(deferred_event)
+
+    events.sort(key=lambda item: (item.get("event_date", ""), item.get("priority_order", 99)))
+    for index, item in enumerate(events, start=1):
+        item["order"] = index
+        item.pop("priority_order", None)
+    return events
+
+
+def build_three_year_term_event(
+    current_run: dict[str, Any],
+    fiscal_end_month: int,
+    as_of: date,
+) -> dict[str, Any] | None:
+    start_year = int_or_zero(current_run.get("start_year"))
+    end_year = int_or_zero(current_run.get("end_year"))
+    auditor = str(current_run.get("auditor", "")).strip()
+    if not start_year or not end_year:
+        return None
+
+    years_into_run = max(0, end_year - start_year)
+    block_start = start_year + (years_into_run // THREE_YEAR_APPOINTMENT_TERM) * THREE_YEAR_APPOINTMENT_TERM
+    block_end = block_start + THREE_YEAR_APPOINTMENT_TERM - 1
+    review_fiscal_year = block_end + 1
+    event_date = appointment_deadline(review_fiscal_year, fiscal_end_month)
+    days_remaining = (event_date - as_of).days
+    return audit_timeline_event(
+        kind="three_year_term",
+        title="3개 사업연도 동일 감사인 계약 검토",
+        event_date=event_date,
+        fiscal_year=review_fiscal_year,
+        days_remaining=days_remaining,
+        detail=(
+            f"{auditor or '현재 감사인'} 기준 {block_start}~{block_end} 사업연도 3년 구간 이후 "
+            "재선임, 교체, 지정 여부를 확인해야 합니다."
+        ),
+        basis="주권상장법인 등은 연속 3개 사업연도 동일 감사인 선임 의무가 있습니다.",
+        confidence="medium",
+        priority_order=20,
+    )
+
+
+def build_designation_exit_event(
+    current_run: dict[str, Any],
+    previous_run: dict[str, Any],
+    fiscal_end_month: int,
+    subject: dict[str, str],
+    estimated_event: dict[str, Any],
+    as_of: date,
+) -> dict[str, Any] | None:
+    if subject.get("status") == "out_of_listed_scope":
+        return None
+    if estimated_event.get("type") != "possible_designated_cycle":
+        return None
+
+    start_year = int_or_zero(current_run.get("start_year"))
+    if not start_year:
+        return None
+    term_end_year = start_year + 2
+    transition_fiscal_year = term_end_year + 1
+    event_date = appointment_deadline(transition_fiscal_year, fiscal_end_month)
+    days_remaining = (event_date - as_of).days
+    previous_auditor = str(previous_run.get("auditor", "")).strip()
+    return audit_timeline_event(
+        kind="designation_exit",
+        title="지정감사 종료 후 자유선임 전환 후보",
+        event_date=event_date,
+        fiscal_year=transition_fiscal_year,
+        days_remaining=days_remaining,
+        detail=(
+            f"이전 감사인 {previous_auditor or '확인 감사인'}이 6년 이상 이어진 뒤 감사인이 바뀐 패턴입니다. "
+            f"{transition_fiscal_year} 사업연도 자유선임 전환 가능성을 확인하세요."
+        ),
+        basis="주기적 지정은 통상 3개 사업연도 지정감사 이후 자유선임 전환 검토가 필요합니다.",
+        confidence="medium",
+        priority_order=10,
+    )
+
+
+def build_periodic_designation_event(
+    current_run: dict[str, Any],
+    fiscal_end_month: int,
+    subject: dict[str, str],
+    as_of: date,
+    *,
+    base_years: int,
+    kind: str,
+    title: str,
+    detail_suffix: str,
+) -> dict[str, Any] | None:
+    if subject.get("status") == "out_of_listed_scope":
+        return None
+
+    start_year = int_or_zero(current_run.get("start_year"))
+    end_year = int_or_zero(current_run.get("end_year"))
+    length = int_or_zero(current_run.get("length"))
+    auditor = str(current_run.get("auditor", "")).strip()
+    if not start_year or not end_year:
+        return None
+
+    candidate_fiscal_year = start_year + base_years
+    event_date = appointment_deadline(candidate_fiscal_year, fiscal_end_month)
+    days_remaining = (event_date - as_of).days
+    remaining_years = max(0, base_years - length)
+    confidence = "medium" if subject.get("status") == "likely_subject" else "low"
+    return audit_timeline_event(
+        kind=kind,
+        title=title,
+        event_date=event_date,
+        fiscal_year=candidate_fiscal_year,
+        days_remaining=days_remaining,
+        detail=(
+            f"{auditor or '현재 감사인'} 연속 {length}개 사업연도 확인. "
+            f"{remaining_years}개 사업연도 후 기준 도달로 계산했습니다. {detail_suffix}"
+        ),
+        basis="OpenDART 감사인 이력에는 자유선임/지정 구분이 직접 표시되지 않아 동일 감사인 연속연차를 기준으로 추정합니다.",
+        confidence=confidence,
+        priority_order=30 if base_years == PERIODIC_APPOINTMENT_YEARS else 40,
+    )
+
+
+def audit_timeline_event(
+    *,
+    kind: str,
+    title: str,
+    event_date: date,
+    fiscal_year: int,
+    days_remaining: int,
+    detail: str,
+    basis: str,
+    confidence: str,
+    priority_order: int,
+) -> dict[str, Any]:
+    return {
+        "kind": kind,
+        "title": title,
+        "event_date": event_date.isoformat(),
+        "fiscal_year": str(fiscal_year),
+        "days_remaining": days_remaining,
+        "dday_label": dday_label(days_remaining),
+        "urgency": event_urgency(days_remaining, kind),
+        "detail": detail,
+        "basis": basis,
+        "confidence": confidence,
+        "priority_order": priority_order,
+    }
+
+
+def next_timeline_event(schedule: list[dict[str, Any]]) -> dict[str, Any]:
+    if not schedule:
+        return {}
+    return schedule[0]
+
+
+def resolve_fiscal_end_month(corp: dict[str, str], company_profile: dict[str, Any]) -> int:
+    for source in (company_profile, corp):
+        value = str(source.get("acc_mt", "")).strip()
+        if not value:
+            continue
+        month = int_or_zero(value)
+        if 1 <= month <= 12:
+            return month
+    return 12
+
+
+def fiscal_year_start(fiscal_year: int, fiscal_end_month: int) -> date:
+    if fiscal_end_month == 12:
+        return date(fiscal_year, 1, 1)
+    start_month = fiscal_end_month + 1
+    return date(fiscal_year - 1, start_month, 1)
+
+
+def appointment_deadline(fiscal_year: int, fiscal_end_month: int) -> date:
+    return fiscal_year_start(fiscal_year, fiscal_end_month) + timedelta(days=APPOINTMENT_DEADLINE_DAYS)
+
+
+def dday_label(days_remaining: int) -> str:
+    if days_remaining < 0:
+        return f"D+{abs(days_remaining)}"
+    if days_remaining == 0:
+        return "D-day"
+    return f"D-{days_remaining}"
+
+
+def event_urgency(days_remaining: int, kind: str) -> str:
+    if days_remaining < 0:
+        return "overdue"
+    if days_remaining <= 120:
+        return "urgent"
+    if days_remaining <= (540 if kind in {"periodic_designation", "governance_deferral"} else 365):
+        return "watch"
+    return "normal"
 
 
 def build_sales_strategy(
@@ -2408,12 +2675,7 @@ def build_recommendations(
                 }
             )
 
-    recommendations.sort(
-        key=lambda item: (
-            -int_or_zero(item.get("fit_score")),
-            str(item.get("company", {}).get("corp_name", "")),
-        )
-    )
+    recommendations.sort(key=recommendation_timing_sort_key)
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "query": query,
@@ -2434,6 +2696,7 @@ def recommendation_summary(report: dict[str, Any]) -> dict[str, Any]:
     recommendation = report.get("lead_recommendation", {})
     sales_case = strategy.get("sales_case", {})
     segment = strategy.get("company_segment", {})
+    next_timeline_event_payload = analysis.get("next_timeline_event", {})
     return {
         "company": {
             "corp_name": company.get("corp_name", ""),
@@ -2443,6 +2706,8 @@ def recommendation_summary(report: dict[str, Any]) -> dict[str, Any]:
         "current_auditor": analysis.get("current_auditor"),
         "latest_business_year": analysis.get("latest_business_year"),
         "consecutive_years": analysis.get("consecutive_years"),
+        "next_timeline_event": next_timeline_event_payload,
+        "event_schedule": (analysis.get("event_schedule") or [])[:3],
         "segment": segment.get("label", ""),
         "sales_case": sales_case.get("label", ""),
         "fit_score": recommendation.get("fit_score", 0),
@@ -2454,6 +2719,22 @@ def recommendation_summary(report: dict[str, Any]) -> dict[str, Any]:
         "next_steps": recommendation.get("next_steps", []),
         "score_drivers": recommendation.get("score_drivers", []),
     }
+
+
+def recommendation_timing_sort_key(item: dict[str, Any]) -> tuple[int, int, str]:
+    next_event = item.get("next_timeline_event") or {}
+    raw_days = next_event.get("days_remaining")
+    if raw_days is None or raw_days == "":
+        days = 99999
+    else:
+        days = int_or_zero(raw_days)
+        if days < 0:
+            days = 0
+    return (
+        days,
+        -int_or_zero(item.get("fit_score")),
+        str(item.get("company", {}).get("corp_name", "")),
+    )
 
 
 def build_demo_report() -> dict[str, Any]:
@@ -2474,6 +2755,7 @@ def build_demo_report() -> dict[str, Any]:
     }
     executives = demo_executives()
     analysis = analyze_history(corp, history, date.today().year)
+    attach_event_schedule(corp, {}, analysis, as_of=date.today())
     coverage = build_coverage_summary(
         history,
         history,
@@ -2712,6 +2994,34 @@ def render_markdown(payload: dict[str, Any]) -> str:
         )
         if analysis.get("latest_source_note"):
             lines.append(f"- 출처 메모: {analysis['latest_source_note']}")
+
+        schedule = analysis.get("event_schedule", [])
+        if schedule:
+            lines.extend(
+                [
+                    "",
+                    "## 감사인 교체·지정 타임라인",
+                    "",
+                    "| 순서 | 예상일 | D-day | 사업연도 | 이벤트 | 근거 | 신뢰도 |",
+                    "| --- | --- | --- | --- | --- | --- | --- |",
+                ]
+            )
+            for item in schedule:
+                lines.append(
+                    "| "
+                    + " | ".join(
+                        [
+                            clean_md(item.get("order", "")),
+                            clean_md(item.get("event_date", "")),
+                            clean_md(item.get("dday_label", "")),
+                            clean_md(item.get("fiscal_year", "")),
+                            clean_md(item.get("title", "")),
+                            clean_md(shorten(item.get("basis", ""), 120)),
+                            clean_md(item.get("confidence", "")),
+                        ]
+                    )
+                    + " |"
+                )
 
     if lead_recommendation:
         firm = lead_recommendation.get("firm", {})
@@ -3148,6 +3458,18 @@ INDEX_HTML = r"""<!doctype html>
     .metric strong { display: block; margin-top: 8px; font-size: 18px; line-height: 1.25; }
     .event { border-left: 4px solid var(--brand); padding: 12px 14px; background: var(--brand-soft); margin-bottom: 14px; border-radius: 4px; }
     .event small { color: #46617f; }
+    .timeline { border: 1px solid #b9d5ff; border-radius: 8px; background: #f8fbff; padding: 14px; margin-bottom: 14px; }
+    .timeline h3 { margin: 0 0 10px; font-size: 15px; }
+    .timeline-list { display: grid; gap: 8px; }
+    .timeline-item { display: grid; grid-template-columns: 108px 1fr; gap: 10px; border: 1px solid #cfe0f6; border-left: 4px solid var(--brand); border-radius: 6px; padding: 10px; background: #fff; }
+    .timeline-item.overdue { border-left-color: #dc2626; background: #fff7f7; }
+    .timeline-item.urgent { border-left-color: #ea580c; background: #fff8f0; }
+    .timeline-item.watch { border-left-color: #ca8a04; background: #fffbeb; }
+    .timeline-date span { display: block; color: var(--muted); font-size: 11px; }
+    .timeline-date strong { display: block; margin-top: 3px; font-size: 17px; }
+    .timeline-body strong { display: block; font-size: 14px; line-height: 1.35; }
+    .timeline-body p { margin: 5px 0 0; color: #29425f; line-height: 1.45; }
+    .timeline-body small { display: block; margin-top: 5px; color: var(--muted); line-height: 1.4; }
     .recommendation { border: 1px solid #96c4ff; border-left: 4px solid #0f3f88; background: #f8fbff; border-radius: 6px; padding: 14px; margin-bottom: 14px; }
     .recommendation h3 { margin: 0 0 10px; font-size: 15px; }
     .recommendation-score { display: grid; grid-template-columns: 112px 1fr; gap: 12px; align-items: center; }
@@ -3192,6 +3514,7 @@ INDEX_HTML = r"""<!doctype html>
     li { margin: 5px 0; }
     @media (max-width: 860px) {
       .toolbar, .grid, .summary, .coverage-grid, .strategy-grid, .recommendation-score, .driver-grid { grid-template-columns: 1fr; }
+      .timeline-item { grid-template-columns: 1fr; }
       main { padding: 14px; }
     }
   </style>
@@ -3301,6 +3624,7 @@ INDEX_HTML = r"""<!doctype html>
         </div>
         ${renderLeadRecommendation(data)}
         <div class="event"><strong>${esc(event.headline)}</strong><br>${esc(event.message)}<br><small>신뢰도: ${esc(a.confidence)} · 최신 출처: ${esc(a.latest_source || "OpenDART")}</small></div>
+        ${renderAuditTimeline(a)}
         ${renderSalesStrategy(data)}
         ${renderCoverage(data)}
         ${renderServiceContracts(data)}
@@ -3349,19 +3673,46 @@ INDEX_HTML = r"""<!doctype html>
           <div class="badge">추천 ${rows.length}개</div>
         </div>
         <div class="recommend-list">
-          ${rows.map((row, index) => `<div class="recommend-card">
+          ${rows.map((row, index) => {
+            const next = row.next_timeline_event || {};
+            return `<div class="recommend-card">
             <h3>${index + 1}. ${esc(row.company?.corp_name || "-")}</h3>
             <div class="case-badges">
               <span class="case-badge">${esc(row.grade)} · ${esc(row.fit_score)}점</span>
               <span class="case-badge">${esc(row.segment || "-")}</span>
               <span class="case-badge">${esc(row.sales_case || "-")}</span>
+              ${next.title ? `<span class="case-badge">${esc(next.dday_label || "-")} · ${esc(next.title)}</span>` : ""}
             </div>
             <p><strong>${esc(row.verdict || "-")}</strong></p>
+            ${next.title ? `<p>${esc(next.event_date || "")} · ${esc(next.detail || "")}</p>` : ""}
             <p>${esc(row.opening_angle || "")}</p>
             <p>${esc((row.suggested_services || []).slice(0, 3).join(" · "))}</p>
-          </div>`).join("")}
+          </div>`;
+          }).join("")}
         </div>
       `;
+    }
+
+    function renderAuditTimeline(analysis) {
+      const rows = analysis.event_schedule || [];
+      if (!rows.length) return "";
+      return `<div class="timeline">
+        <h3>감사인 교체·지정 타임라인</h3>
+        <div class="timeline-list">
+          ${rows.map(row => `<div class="timeline-item ${esc(row.urgency || "normal")}">
+            <div class="timeline-date">
+              <span>${esc(row.event_date || "-")}</span>
+              <strong>${esc(row.dday_label || "-")}</strong>
+              <span>${esc(row.fiscal_year || "-")} 사업연도</span>
+            </div>
+            <div class="timeline-body">
+              <strong>${esc(row.order || "")}. ${esc(row.title || "-")}</strong>
+              <p>${esc(row.detail || "")}</p>
+              <small>${esc(row.basis || "")} · 신뢰도 ${esc(row.confidence || "-")}</small>
+            </div>
+          </div>`).join("")}
+        </div>
+      </div>`;
     }
 
     function renderSalesStrategy(data) {

@@ -96,6 +96,7 @@ Lead with:
 - current auditor
 - consecutive tenure
 - estimated next event
+- chronological appointment/rotation timeline with dates and D-day labels
 - sales case segment and recommended next action
 - audit service fee/time signals when available
 - executive and audit-committee candidate signals when available
