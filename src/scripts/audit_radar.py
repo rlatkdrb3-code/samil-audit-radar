@@ -2963,11 +2963,9 @@ def render_job_opportunities(payload: dict[str, Any], output_format: str) -> str
 def render_markdown(payload: dict[str, Any]) -> str:
     company = payload["company"]
     analysis = payload["analysis"]
-    event = analysis.get("estimated_event", {})
-    sales_strategy = payload.get("sales_strategy") or analysis.get("sales_strategy") or {}
-    lead_recommendation = payload.get("lead_recommendation") or analysis.get("lead_recommendation") or {}
+    next_event = analysis.get("next_timeline_event", {})
     lines = [
-        "# Samil Listed Audit Radar Report",
+        "# 감사인 교체 시기 조회",
         "",
         f"- 회사: **{company.get('corp_name', '')}**",
         f"- 고유번호: `{company.get('corp_code', '')}`",
@@ -2986,21 +2984,19 @@ def render_markdown(payload: dict[str, Any]) -> str:
                 f"- 최신 사업연도: **{analysis['latest_business_year']}**",
                 f"- 동일 감사인 연속연차: **{analysis['consecutive_years']}년**",
                 f"- 법인구분: **{analysis['corp_class_label']}**",
-                f"- 최신 감사인 출처: **{analysis.get('latest_source', '')}**",
-                f"- 예상 이벤트: **{event.get('headline', '')}**",
-                f"- 신뢰도: **{analysis['confidence']}**",
-                f"- 해석: {event.get('message', '')}",
+                f"- 관련 기준: **{next_event.get('title', '-')}**",
+                f"- 교체/검토 시기: **{next_event.get('event_date', '-')}**",
+                f"- 남은 기간: **{next_event.get('dday_label', '-')}**",
+                f"- 기준 근거: {next_event.get('basis', '')}",
             ]
         )
-        if analysis.get("latest_source_note"):
-            lines.append(f"- 출처 메모: {analysis['latest_source_note']}")
 
         schedule = analysis.get("event_schedule", [])
         if schedule:
             lines.extend(
                 [
                     "",
-                    "## 감사인 교체·지정 타임라인",
+                    "## 관련 기준별 일정",
                     "",
                     "| 순서 | 예상일 | D-day | 사업연도 | 이벤트 | 근거 | 신뢰도 |",
                     "| --- | --- | --- | --- | --- | --- | --- |",
@@ -3023,76 +3019,12 @@ def render_markdown(payload: dict[str, Any]) -> str:
                     + " |"
                 )
 
-    if lead_recommendation:
-        firm = lead_recommendation.get("firm", {})
-        lines.extend(
-            [
-                "",
-                "## Firm Context 추천 판단",
-                "",
-                f"- Firm context: **{firm.get('label', '')}**",
-                f"- 추천등급: **{lead_recommendation.get('grade', '')} / {lead_recommendation.get('fit_score', 0)}점**",
-                f"- 판단: **{lead_recommendation.get('verdict', '')}**",
-                f"- 리드 유형: {lead_recommendation.get('target_type', '')}",
-                f"- 첫 컨택 각도: {lead_recommendation.get('opening_angle', '')}",
-            ]
-        )
-        for service in lead_recommendation.get("suggested_services", [])[:4]:
-            lines.append(f"- 제안 서비스: {service}")
-        for driver in lead_recommendation.get("score_drivers", []):
-            lines.append(
-                f"- 점수 근거: {driver.get('label', '')} {driver.get('points', 0)}점 - {driver.get('evidence', '')}"
-            )
-
-    if sales_strategy:
-        segment = sales_strategy.get("company_segment", {})
-        sales_case = sales_strategy.get("sales_case", {})
-        lines.extend(
-            [
-                "",
-                "## 영업 케이스",
-                "",
-                f"- 세그먼트: **{segment.get('label', '')}** ({segment.get('confidence', '')})",
-                f"- 케이스: **{sales_case.get('label', '')}**",
-                f"- 우선순위: **{priority_label(str(sales_case.get('priority', '')))}**",
-                f"- 예상 타이밍: {sales_case.get('timing', '')}",
-                f"- 다음 액션: {sales_case.get('next_action', '')}",
-            ]
-        )
-        if sales_strategy.get("flags"):
-            flag_labels = ", ".join(flag.get("label", "") for flag in sales_strategy["flags"])
-            lines.append(f"- 보조 플래그: {flag_labels}")
-        if sales_case.get("rationale"):
-            lines.append(f"- 판단 근거: {sales_case['rationale']}")
-        for evidence in segment.get("evidence", []):
-            lines.append(f"- 세그먼트 근거: {evidence}")
-        for caveat in sales_case.get("caveats", []):
-            lines.append(f"- 주의: {caveat}")
-
-    coverage = payload.get("coverage", {})
-    if coverage:
-        lines.extend(
-            [
-                "",
-                "## 공시 커버리지",
-                "",
-                f"- 병합 이력 행: {coverage.get('merged_rows', 0)}건",
-                f"- 정기보고서 API 행: {coverage.get('periodic_report_api_rows', 0)}건",
-                f"- 외부감사 감사보고서 공시 행: {coverage.get('external_audit_report_rows', 0)}건",
-                f"- 특이공시 행: {coverage.get('special_issue_rows', 0)}건",
-            ]
-        )
-        if coverage.get("missing_recent_years"):
-            lines.append(f"- 최근 공시 미확인 연도: {', '.join(coverage['missing_recent_years'])}")
-        for note in coverage.get("notes", []):
-            lines.append(f"- {note}")
-
     executives = payload.get("executives", [])
     if executives:
         lines.extend(
             [
                 "",
-                "## 임원 및 선임 후보군",
+                "## 임원",
                 "",
                 "| 성명 | 직위 | 담당업무 | 등기/상근 | 선임 관련 신호 | 주요 경력 |",
                 "| --- | --- | --- | --- | --- | --- |",
@@ -3109,6 +3041,25 @@ def render_markdown(payload: dict[str, Any]) -> str:
                         clean_md(" / ".join(filter(None, [str(row.get("rgist_exctv_at", "")).strip(), str(row.get("fte_at", "")).strip()]))),
                         clean_md(row.get("decision_role_signal", "")),
                         clean_md(shorten(row.get("main_career", ""), 120)),
+                    ]
+                )
+                + " |"
+        )
+
+    contracts = payload.get("service_contracts", [])
+    if contracts:
+        lines.extend(["", "## 감사용역 체결현황", "", "| 사업연도 | 감사인 | 계약보수 | 계약시간 | 실제보수 | 실제시간 |", "| --- | --- | --- | --- | --- | --- |"])
+        for row in contracts[:8]:
+            lines.append(
+                "| "
+                + " | ".join(
+                    [
+                        clean_md(contract_period_display(row)),
+                        clean_md(row.get("adtor", "")),
+                        clean_md(row.get("adt_cntrct_dtls_mendng") or row.get("mendng", "")),
+                        clean_md(row.get("adt_cntrct_dtls_time") or row.get("tot_reqre_time", "")),
+                        clean_md(row.get("real_exc_dtls_mendng", "")),
+                        clean_md(row.get("real_exc_dtls_time", "")),
                     ]
                 )
                 + " |"
@@ -3139,61 +3090,6 @@ def render_markdown(payload: dict[str, Any]) -> str:
             + " |"
         )
 
-    issues = payload.get("special_issues", [])
-    if issues:
-        lines.extend(
-            [
-                "",
-                "## 특이사항 공시",
-                "",
-                "| 접수일 | 유형 | 보고서명 | 제출인 | 원문 |",
-                "| --- | --- | --- | --- | --- |",
-            ]
-        )
-        for issue in issues:
-            link = issue.get("rcept_no", "")
-            if issue.get("rcept_url"):
-                link = f"[{issue.get('rcept_no', '')}]({issue.get('rcept_url', '')})"
-            lines.append(
-                "| "
-                + " | ".join(
-                    [
-                        clean_md(issue.get("rcept_dt", "")),
-                        clean_md(issue.get("issue_type", "")),
-                        clean_md(issue.get("report_nm", "")),
-                        clean_md(issue.get("flr_nm", "")),
-                        clean_md(link),
-                    ]
-                )
-                + " |"
-            )
-
-    contracts = payload.get("service_contracts", [])
-    if contracts:
-        lines.extend(["", "## 감사용역 체결현황", "", "| 사업연도 | 감사인 | 계약보수 | 계약시간 | 실제보수 | 실제시간 |", "| --- | --- | --- | --- | --- | --- |"])
-        for row in contracts[:8]:
-            lines.append(
-                "| "
-                + " | ".join(
-                    [
-                        clean_md(contract_period_display(row)),
-                        clean_md(row.get("adtor", "")),
-                        clean_md(row.get("adt_cntrct_dtls_mendng") or row.get("mendng", "")),
-                        clean_md(row.get("adt_cntrct_dtls_time") or row.get("tot_reqre_time", "")),
-                        clean_md(row.get("real_exc_dtls_mendng", "")),
-                        clean_md(row.get("real_exc_dtls_time", "")),
-                    ]
-                )
-                + " |"
-            )
-
-    lines.extend(["", "## 확인 필요", ""])
-    for item in analysis.get("follow_up", []):
-        lines.append(f"- {item}")
-
-    lines.extend(["", "## 주의", ""])
-    for item in payload.get("disclaimers", []):
-        lines.append(f"- {item}")
     return "\n".join(lines)
 
 
@@ -3439,7 +3335,7 @@ INDEX_HTML = r"""<!doctype html>
     h1 { margin: 0; font-size: 24px; letter-spacing: 0; }
     h2 { font-size: 16px; margin: 0 0 12px; }
     .subtitle { margin-top: 5px; color: #bfdbfe; font-size: 13px; }
-    .toolbar { display: grid; grid-template-columns: 1fr 116px 92px 92px; gap: 10px; margin: 0; }
+    .toolbar { display: grid; grid-template-columns: 1fr 116px 92px; gap: 10px; margin: 0; }
     input, select, button { font: inherit; height: 44px; border: 1px solid var(--line); border-radius: 6px; padding: 0 12px; background: #fff; color: var(--ink); }
     input:focus, select:focus { outline: 2px solid rgba(37, 99, 235, 0.22); border-color: var(--brand); }
     button { background: var(--brand); color: #fff; border-color: var(--brand); cursor: pointer; font-weight: 700; }
@@ -3456,6 +3352,13 @@ INDEX_HTML = r"""<!doctype html>
     .metric { border: 1px solid #cfe0f6; border-radius: 8px; padding: 12px; background: #f8fbff; min-height: 86px; }
     .metric span { display: block; color: var(--muted); font-size: 12px; }
     .metric strong { display: block; margin-top: 8px; font-size: 18px; line-height: 1.25; }
+    .decision { border: 1px solid #96c4ff; border-left: 4px solid #0f3f88; background: #f8fbff; border-radius: 6px; padding: 14px; margin-bottom: 14px; }
+    .decision h3 { margin: 0 0 10px; font-size: 15px; }
+    .decision-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .decision-block { border-top: 1px solid #d7e5f8; padding-top: 10px; min-width: 0; }
+    .decision-block span { display: block; color: var(--muted); font-size: 12px; margin-bottom: 4px; }
+    .decision-block strong { display: block; font-size: 16px; line-height: 1.35; }
+    .decision-block p { margin: 6px 0 0; color: #29425f; line-height: 1.45; }
     .event { border-left: 4px solid var(--brand); padding: 12px 14px; background: var(--brand-soft); margin-bottom: 14px; border-radius: 4px; }
     .event small { color: #46617f; }
     .timeline { border: 1px solid #b9d5ff; border-radius: 8px; background: #f8fbff; padding: 14px; margin-bottom: 14px; }
@@ -3513,7 +3416,7 @@ INDEX_HTML = r"""<!doctype html>
     ul { margin: 8px 0 0 18px; padding: 0; }
     li { margin: 5px 0; }
     @media (max-width: 860px) {
-      .toolbar, .grid, .summary, .coverage-grid, .strategy-grid, .recommendation-score, .driver-grid { grid-template-columns: 1fr; }
+      .toolbar, .grid, .summary, .coverage-grid, .strategy-grid, .recommendation-score, .driver-grid, .decision-grid { grid-template-columns: 1fr; }
       .timeline-item { grid-template-columns: 1fr; }
       main { padding: 14px; }
     }
@@ -3521,8 +3424,8 @@ INDEX_HTML = r"""<!doctype html>
 </head>
 <body>
   <header>
-    <h1>Samil Listed Audit Radar</h1>
-    <div class="subtitle">상장사 OpenDART 기반 감사인·감사보수·임원 주요경력 레이더</div>
+    <h1>감사인 교체 시기 조회</h1>
+    <div class="subtitle">OpenDART 기반 상장사 감사인·교체 기준·남은 기간</div>
   </header>
   <main>
     <section class="panel search-panel">
@@ -3534,7 +3437,6 @@ INDEX_HTML = r"""<!doctype html>
           <option value="12">12년</option>
         </select>
         <button id="searchBtn">검색</button>
-        <button id="recommendBtn">추천</button>
       </div>
       <div class="status" id="status"></div>
     </section>
@@ -3544,7 +3446,7 @@ INDEX_HTML = r"""<!doctype html>
         <div id="results"></div>
       </section>
       <section class="panel">
-        <h2>감사영업 레이더</h2>
+        <h2>감사인 교체 시기</h2>
         <div id="report">기업을 검색한 뒤 결과를 선택하세요.</div>
       </section>
     </div>
@@ -3552,7 +3454,6 @@ INDEX_HTML = r"""<!doctype html>
   <script>
     const $ = (id) => document.getElementById(id);
     $("searchBtn").addEventListener("click", search);
-    $("recommendBtn").addEventListener("click", recommend);
     $("query").addEventListener("keydown", (event) => { if (event.key === "Enter") search(); });
 
     async function getJson(url) {
@@ -3579,21 +3480,6 @@ INDEX_HTML = r"""<!doctype html>
       }
     }
 
-    async function recommend() {
-      const q = $("query").value.trim();
-      if (!q) return;
-      $("status").textContent = "추천 산정 중...";
-      $("report").innerHTML = "추천 후보를 산정하고 있습니다.";
-      try {
-        const years = $("years").value;
-        const data = await getJson(`/api/recommend?q=${encodeURIComponent(q)}&years=${years}&limit=3`);
-        renderRecommendations(data);
-        $("status").textContent = `${(data.recommendations || []).length}개 추천`;
-      } catch (err) {
-        $("status").textContent = err.message;
-      }
-    }
-
     async function loadReport(name, code) {
       $("status").textContent = "리포트 생성 중...";
       try {
@@ -3613,91 +3499,48 @@ INDEX_HTML = r"""<!doctype html>
         $("report").innerHTML = `${meta}<p>${a.message || "데이터 없음"}</p>`;
         return;
       }
-      const event = a.estimated_event || {};
+      const company = data.company || {};
+      const next = a.next_timeline_event || {};
       $("report").innerHTML = `
         ${meta}
         <div class="summary">
-          <div class="metric"><span>현재 감사인</span><strong>${esc(a.current_auditor)}</strong></div>
-          <div class="metric"><span>최신 사업연도</span><strong>${esc(a.latest_business_year)}</strong></div>
-          <div class="metric"><span>연속연차</span><strong>${a.consecutive_years}년</strong></div>
-          <div class="metric"><span>법인구분</span><strong>${esc(a.corp_class_label)}</strong></div>
+          <div class="metric"><span>대상 회사</span><strong>${esc(company.corp_name || "-")}</strong></div>
+          <div class="metric"><span>현재 감사인</span><strong>${esc(a.current_auditor || "-")}</strong></div>
+          <div class="metric"><span>교체/검토 시기</span><strong>${esc(next.event_date || "-")}</strong></div>
+          <div class="metric"><span>남은 기간</span><strong>${esc(next.dday_label || "-")}</strong></div>
         </div>
-        ${renderLeadRecommendation(data)}
-        <div class="event"><strong>${esc(event.headline)}</strong><br>${esc(event.message)}<br><small>신뢰도: ${esc(a.confidence)} · 최신 출처: ${esc(a.latest_source || "OpenDART")}</small></div>
+        ${renderPrimaryDecision(data)}
         ${renderAuditTimeline(a)}
-        ${renderSalesStrategy(data)}
-        ${renderCoverage(data)}
-        ${renderServiceContracts(data)}
         ${renderExecutives(data)}
         <h2>감사인 이력</h2>
         <table><thead><tr><th>사업연도</th><th>감사인</th><th>의견</th><th>출처</th><th>보고서</th></tr></thead>
         <tbody>${(data.history || []).map(row => `<tr><td>${esc(row.bsns_year)}</td><td>${esc(row.adtor)}</td><td>${esc(row.adt_opinion || "-")}</td><td>${esc(row.source_detail || "-")}<small>${esc(row.source_note || "")}</small></td><td>${filingLink(row)}</td></tr>`).join("")}</tbody></table>
+        ${renderServiceContracts(data)}
         ${renderSpecialIssues(data)}
-        <h2 style="margin-top:16px;">확인 필요</h2>
-        <ul>${(a.follow_up || []).map(item => `<li>${esc(item)}</li>`).join("")}</ul>
+        ${renderCoverage(data)}
       `;
     }
 
-    function renderLeadRecommendation(data) {
-      const rec = data.lead_recommendation || (data.analysis || {}).lead_recommendation || {};
-      if (!Object.keys(rec).length) return "";
-      const firm = rec.firm || {};
-      const drivers = rec.score_drivers || [];
-      const services = rec.suggested_services || [];
-      const driverHtml = drivers.map(driver => `<div class="driver"><span>${esc(driver.label)}</span><strong>${esc(driver.points)}점</strong></div>`).join("");
-      const serviceText = services.slice(0, 3).join(" · ");
-      return `<div class="recommendation">
-        <h3>${esc(firm.label || "회계법인")} 추천 판단</h3>
-        <div class="recommendation-score">
-          <div class="score-ring"><strong>${esc(rec.grade || "-")}</strong><span>${esc(rec.fit_score || 0)}점</span></div>
-          <div class="recommendation-body">
-            <strong>${esc(rec.verdict || "-")}</strong>
-            <p>${esc(rec.opening_angle || "")}</p>
-            <p>${esc(serviceText)}</p>
-          </div>
+    function renderPrimaryDecision(data) {
+      const analysis = data.analysis || {};
+      const company = data.company || {};
+      const next = analysis.next_timeline_event || {};
+      return `<div class="decision">
+        <h3>교체/검토 기준</h3>
+        <div class="decision-grid">
+          <div class="decision-block"><span>대상 회사</span><strong>${esc(company.corp_name || "-")}</strong><p>${esc(company.stock_code || "-")} · ${esc(analysis.corp_class_label || "-")}</p></div>
+          <div class="decision-block"><span>감사인</span><strong>${esc(analysis.current_auditor || "-")}</strong><p>${esc(analysis.latest_business_year || "-")} 사업연도 기준 · 연속 ${esc(analysis.consecutive_years || "-")}년</p></div>
+          <div class="decision-block"><span>관련 기준</span><strong>${esc(next.title || "-")}</strong><p>${esc(next.basis || "")}</p></div>
+          <div class="decision-block"><span>시기</span><strong>${esc(next.event_date || "-")} · ${esc(next.dday_label || "-")}</strong><p>${esc(next.detail || "")}</p></div>
         </div>
-        <div class="driver-grid">${driverHtml}</div>
       </div>`;
-    }
-
-    function renderRecommendations(data) {
-      const firm = data.firm_persona || {};
-      const rows = data.recommendations || [];
-      if (!rows.length) {
-        $("report").innerHTML = `<div class="report-meta"><div><span>Firm context</span><strong>${esc(firm.label || "-")}</strong></div><div class="badge">추천 없음</div></div><p>추천 후보를 만들 수 없습니다.</p>`;
-        return;
-      }
-      $("report").innerHTML = `
-        <div class="report-meta">
-          <div><span>Firm context</span><strong>${esc(firm.label || "-")}</strong></div>
-          <div class="badge">추천 ${rows.length}개</div>
-        </div>
-        <div class="recommend-list">
-          ${rows.map((row, index) => {
-            const next = row.next_timeline_event || {};
-            return `<div class="recommend-card">
-            <h3>${index + 1}. ${esc(row.company?.corp_name || "-")}</h3>
-            <div class="case-badges">
-              <span class="case-badge">${esc(row.grade)} · ${esc(row.fit_score)}점</span>
-              <span class="case-badge">${esc(row.segment || "-")}</span>
-              <span class="case-badge">${esc(row.sales_case || "-")}</span>
-              ${next.title ? `<span class="case-badge">${esc(next.dday_label || "-")} · ${esc(next.title)}</span>` : ""}
-            </div>
-            <p><strong>${esc(row.verdict || "-")}</strong></p>
-            ${next.title ? `<p>${esc(next.event_date || "")} · ${esc(next.detail || "")}</p>` : ""}
-            <p>${esc(row.opening_angle || "")}</p>
-            <p>${esc((row.suggested_services || []).slice(0, 3).join(" · "))}</p>
-          </div>`;
-          }).join("")}
-        </div>
-      `;
     }
 
     function renderAuditTimeline(analysis) {
       const rows = analysis.event_schedule || [];
       if (!rows.length) return "";
       return `<div class="timeline">
-        <h3>감사인 교체·지정 타임라인</h3>
+        <h3>관련 기준별 일정</h3>
         <div class="timeline-list">
           ${rows.map(row => `<div class="timeline-item ${esc(row.urgency || "normal")}">
             <div class="timeline-date">
@@ -3711,29 +3554,6 @@ INDEX_HTML = r"""<!doctype html>
               <small>${esc(row.basis || "")} · 신뢰도 ${esc(row.confidence || "-")}</small>
             </div>
           </div>`).join("")}
-        </div>
-      </div>`;
-    }
-
-    function renderSalesStrategy(data) {
-      const strategy = data.sales_strategy || (data.analysis || {}).sales_strategy || {};
-      if (!Object.keys(strategy).length) return "";
-      const segment = strategy.company_segment || {};
-      const sales = strategy.sales_case || {};
-      const badges = strategy.case_badges || [];
-      const flags = strategy.flags || [];
-      const evidence = (segment.evidence || []).slice(0, 2);
-      const caveats = (sales.caveats || []).slice(0, 2);
-      const flagText = flags.length ? flags.map(flag => flag.label).join(" · ") : "추가 플래그 없음";
-      const badgesHtml = badges.map(label => `<span class="case-badge">${esc(label)}</span>`).join("");
-      return `<div class="strategy">
-        <h3>영업 케이스</h3>
-        <div class="case-badges">${badgesHtml}</div>
-        <div class="strategy-grid">
-          <div class="strategy-block"><span>세그먼트</span><strong>${esc(segment.label || "-")}</strong><p>${esc((evidence[0] || segment.confidence || ""))}</p></div>
-          <div class="strategy-block"><span>다음 액션</span><strong>${esc(sales.next_action || "-")}</strong><p>${esc(sales.timing || "")}</p></div>
-          <div class="strategy-block"><span>보조 플래그</span><strong>${esc(flagText)}</strong><p>${esc((evidence[1] || sales.rationale || ""))}</p></div>
-          <div class="strategy-block"><span>주의</span><strong>${esc(caveats[0] || "공개 데이터 기반 추정")}</strong><p>${esc(caveats[1] || "")}</p></div>
         </div>
       </div>`;
     }
@@ -3775,7 +3595,7 @@ INDEX_HTML = r"""<!doctype html>
     function renderExecutives(data) {
       const rows = data.executives || [];
       if (!rows.length) return "";
-      return `<h2 style="margin-top:16px;">임원 및 선임 후보군</h2>
+      return `<h2 style="margin-top:16px;">임원</h2>
         <table><thead><tr><th>성명</th><th>직위/담당</th><th>등기/상근</th><th>선임 관련 신호</th><th>주요경력</th><th>원문</th></tr></thead>
         <tbody>${rows.slice(0, 12).map(row => `<tr>
           <td>${esc(row.nm || "-")}</td>
