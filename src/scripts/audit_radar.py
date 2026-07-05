@@ -1359,8 +1359,63 @@ def normalize_service_contract_rows(rows: list[dict[str, Any]], report_year: int
         item = normalize_disclosure_row(row, inferred_year)
         item["source_report_year"] = str(report_year)
         item["rcept_url"] = dart_viewer_url(item.get("rcept_no", ""))
+        attach_hourly_fee_metrics(item)
         normalized.append(item)
     return normalized
+
+
+def attach_hourly_fee_metrics(row: dict[str, Any]) -> None:
+    contract_fee = row.get("adt_cntrct_dtls_mendng") or row.get("mendng")
+    contract_time = row.get("adt_cntrct_dtls_time") or row.get("tot_reqre_time")
+    actual_fee = row.get("real_exc_dtls_mendng")
+    actual_time = row.get("real_exc_dtls_time")
+    row["contract_hourly_fee"] = hourly_fee_display(contract_fee, contract_time)
+    row["actual_hourly_fee"] = hourly_fee_display(actual_fee, actual_time)
+    if row["contract_hourly_fee"] or row["actual_hourly_fee"]:
+        row["hourly_fee_note"] = "보수는 DART 감사용역 보수 입력값을 원/시간으로 환산했습니다."
+
+
+def hourly_fee_display(fee_value: Any, time_value: Any) -> str:
+    fee_amount = parse_numeric_value(fee_value)
+    hours = parse_numeric_value(time_value)
+    if fee_amount is None or hours is None or hours <= 0:
+        return ""
+    krw_amount = fee_amount * fee_unit_multiplier(fee_value, fee_amount)
+    return format_krw_per_hour(krw_amount / hours)
+
+
+def parse_numeric_value(value: Any) -> float | None:
+    text = str(value or "").strip()
+    if not text or text in {"-", "—", "N/A", "n/a"} or "해당사항" in text:
+        return None
+    match = re.search(r"-?\d[\d,]*(?:\.\d+)?", text)
+    if not match:
+        return None
+    try:
+        return float(match.group(0).replace(",", ""))
+    except ValueError:
+        return None
+
+
+def fee_unit_multiplier(value: Any, amount: float) -> int:
+    text = re.sub(r"\s+", "", str(value or ""))
+    if "억원" in text:
+        return 100_000_000
+    if "백만원" in text or "백만" in text:
+        return 1_000_000
+    if "천원" in text:
+        return 1_000
+    if "원" in text:
+        return 1
+    return 1 if amount >= 1_000_000 else 1_000_000
+
+
+def format_krw_per_hour(value: float) -> str:
+    if value >= 1_000_000:
+        return f"{value / 1_000_000:,.1f}백만원/시간"
+    if value >= 10_000:
+        return f"{round(value / 100) * 100:,.0f}원/시간"
+    return f"{value:,.0f}원/시간"
 
 
 def period_term_number(value: Any) -> int | None:
@@ -3485,7 +3540,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
 
     contracts = payload.get("service_contracts", [])
     if contracts:
-        lines.extend(["", "## 감사용역 체결현황", "", "| 사업연도 | 감사인 | 계약보수 | 계약시간 | 실제보수 | 실제시간 |", "| --- | --- | --- | --- | --- | --- |"])
+        lines.extend(["", "## 감사용역 체결현황", "", "| 사업연도 | 감사인 | 계약보수 | 계약시간 | 실제보수 | 실제시간 | 시간당 보수 |", "| --- | --- | --- | --- | --- | --- | --- |"])
         for row in contracts[:8]:
             lines.append(
                 "| "
@@ -3497,6 +3552,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
                         clean_md(row.get("adt_cntrct_dtls_time") or row.get("tot_reqre_time", "")),
                         clean_md(row.get("real_exc_dtls_mendng", "")),
                         clean_md(row.get("real_exc_dtls_time", "")),
+                        clean_md(hourly_fee_markdown(row)),
                     ]
                 )
                 + " |"
@@ -3554,6 +3610,18 @@ def contract_period_display(row: dict[str, Any]) -> str:
     if period and period != year:
         return f"{year} ({period})"
     return year
+
+
+def hourly_fee_markdown(row: dict[str, Any]) -> str:
+    contract = str(row.get("contract_hourly_fee") or "").strip()
+    actual = str(row.get("actual_hourly_fee") or "").strip()
+    if contract and actual:
+        return f"계약 {contract} / 실제 {actual}"
+    if actual:
+        return f"실제 {actual}"
+    if contract:
+        return f"계약 {contract}"
+    return "-"
 
 
 def markdown_filing_label(row: dict[str, Any]) -> str:
@@ -4086,7 +4154,7 @@ INDEX_HTML = r"""<!doctype html>
       const rows = data.service_contracts || [];
       if (!rows.length) return "";
       return `<h2 style="margin-top:16px;">감사용역 보수·시간</h2>
-        <table><thead><tr><th>사업연도</th><th>감사인</th><th>계약보수</th><th>계약시간</th><th>실제보수</th><th>실제시간</th></tr></thead>
+        <table><thead><tr><th>사업연도</th><th>감사인</th><th>계약보수</th><th>계약시간</th><th>실제보수</th><th>실제시간</th><th>시간당 보수</th></tr></thead>
         <tbody>${rows.slice(0, 8).map(row => `<tr>
           <td>${esc(row.bsns_year)}<small>${esc(row.period_label || "")}</small></td>
           <td>${esc(row.adtor || "-")}</td>
@@ -4094,7 +4162,18 @@ INDEX_HTML = r"""<!doctype html>
           <td>${esc(row.adt_cntrct_dtls_time || row.tot_reqre_time || "-")}</td>
           <td>${esc(row.real_exc_dtls_mendng || "-")}</td>
           <td>${esc(row.real_exc_dtls_time || "-")}</td>
+          <td>${renderHourlyFee(row)}</td>
         </tr>`).join("")}</tbody></table>`;
+    }
+
+    function renderHourlyFee(row) {
+      const contract = row.contract_hourly_fee || "";
+      const actual = row.actual_hourly_fee || "";
+      if (!contract && !actual) return "-";
+      const parts = [];
+      if (contract) parts.push(`계약 ${esc(contract)}`);
+      if (actual) parts.push(`<small>실제 ${esc(actual)}</small>`);
+      return parts.join("");
     }
 
     function renderExecutives(data) {
