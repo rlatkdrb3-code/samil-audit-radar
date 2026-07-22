@@ -22,6 +22,7 @@ Use public information only:
 - OpenDART "감사용역체결현황" API for audit fee/time and hourly-fee context.
 - OpenDART "임원 현황" API for executive name, position, registered/full-time status, duty, major career, tenure, and tenure-end fields.
 - OpenDART annual-report and regular-disclosure search for latest available business-year coverage.
+- OpenDART `document.xml` original annual-report files for recent years where the structured auditor API is blank. Accept an auditor only when the unique maximum reporting term in both an audit-opinion table and the audit-service table agrees.
 - OpenDART disclosure search for `외부감사관련` filings, including auditor appointment, auditor change, tender, proposal-request, delayed submission, and corrected audit-related filings.
 - Public company IR, KRX, notice, procurement, or tender pages when a company-specific appointment period or tender status is needed beyond OpenDART.
 - Public FSC/FSS guidance on external auditor appointment and periodic designation, when explaining the rule basis.
@@ -47,7 +48,7 @@ Do not derive a company-specific appointment period or future date from auditor-
 
 Strongly supported statements:
 
-- Auditor for the latest completed business year actually observed in the structured annual-report data.
+- Auditor for the latest completed business year actually observed in the structured annual-report API or verified by agreeing primary tables in the original annual report.
 - Recent auditor names and audit opinions shown in OpenDART annual-report API results.
 - Legal/market category from OpenDART `corp_cls`: Y = KOSPI, K = KOSDAQ, N = KONEX, E = other.
 - Audit service fee/time fields and hourly fee when present in the annual report API response.
@@ -74,6 +75,8 @@ Apply these guardrails:
 
 - Treat consecutive auditor-name rows as history, not as one appointment contract.
 - If the latest expected completed business year is missing, label `data gap`; do not call an older auditor current.
+- If a recent middle year is missing, label the history partial and warn that consecutive-year counts may be understated.
+- Never use a whole-document keyword or flat-text match to fill an auditor. For an original-document fallback, require the maximum current term and agreement between the primary audit-opinion and audit-service tables; reject conflicts.
 - If no official appointment source states the target period, output `현재 선임기간 원문 확인` and omit dates, D-day, and urgency.
 - Do not infer periodic-designation timing from same-auditor tenure.
 - Do not use a filing-list submitter name as the auditor unless the original filing verifies it.

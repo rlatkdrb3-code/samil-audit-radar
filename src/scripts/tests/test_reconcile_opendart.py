@@ -78,6 +78,31 @@ class ReconcileUniverseTests(unittest.TestCase):
         self.assertEqual(reconcile.parse_hours("39.012"), 39012)
         self.assertEqual(reconcile.parse_hours("40,370"), 40370)
 
+    def test_structured_audit_rows_choose_current_term_and_parse_units(self):
+        rows = [
+            {
+                "bsns_year": "제57기",
+                "adtor": "과거회계법인",
+                "adt_cntrct_dtls_mendng": "900",
+                "adt_cntrct_dtls_time": "9,000",
+            },
+            {
+                "bsns_year": "제58기",
+                "adtor": "현재회계법인",
+                "adt_cntrct_dtls_mendng": "1,000",
+                "adt_cntrct_dtls_time": "10,000",
+                "real_exc_dtls_mendng": "1,100백만원",
+                "real_exc_dtls_time": "10.500",
+                "rcept_no": "20260301000001",
+            },
+        ]
+        parsed = reconcile.parse_audit_service_api_rows(rows)
+        self.assertEqual(parsed["auditor"], "현재회계법인")
+        self.assertEqual(parsed["contract_fee"], 1_000_000_000)
+        self.assertEqual(parsed["actual_fee"], 1_100_000_000)
+        self.assertEqual(parsed["contract_hours"], 10_000)
+        self.assertEqual(parsed["actual_hours"], 10_500)
+
 
 if __name__ == "__main__":
     unittest.main()

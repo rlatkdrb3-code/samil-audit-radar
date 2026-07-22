@@ -520,6 +520,79 @@ def reconcile_document(
         return key, None, str(exc)
 
 
+def parse_audit_service_api_rows(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    candidates: list[tuple[int, dict[str, Any]]] = []
+    for row in rows:
+        rank = reporting_period_rank(str(row.get("bsns_year") or ""))
+        if rank is None:
+            continue
+        auditor = clean_text(str(row.get("adtor") or ""))
+        contract_cell = str(
+            row.get("adt_cntrct_dtls_mendng") or row.get("mendng") or ""
+        )
+        actual_cell = str(row.get("real_exc_dtls_mendng") or "")
+        contract_fee, contract_warning = parse_money(contract_cell, "")
+        actual_fee, actual_warning = parse_money(actual_cell, "")
+        if not auditor and contract_fee is None and actual_fee is None:
+            continue
+        candidates.append(
+            (
+                rank,
+                {
+                    "auditor": auditor,
+                    "contract_fee": contract_fee,
+                    "actual_fee": actual_fee,
+                    "contract_hours": parse_hours(
+                        str(
+                            row.get("adt_cntrct_dtls_time")
+                            or row.get("tot_reqre_time")
+                            or ""
+                        )
+                    ),
+                    "actual_hours": parse_hours(
+                        str(row.get("real_exc_dtls_time") or "")
+                    ),
+                    "rcept_no": str(row.get("rcept_no") or ""),
+                    "warnings": [
+                        warning
+                        for warning in (contract_warning, actual_warning)
+                        if warning
+                    ],
+                },
+            )
+        )
+    if not candidates:
+        return None
+    maximum_rank = max(item[0] for item in candidates)
+    current = [item[1] for item in candidates if item[0] == maximum_rank]
+    auditors = {
+        auditor_identity(item["auditor"])
+        for item in current
+        if item.get("auditor")
+    }
+    if len(current) > 1 and len(auditors) != 1:
+        return None
+    return current[0]
+
+
+def fetch_audit_service_api(
+    client: DartClient,
+    row: dict[str, str],
+) -> tuple[tuple[str, str], dict[str, Any] | None, str]:
+    key = (row.get("year", ""), row.get("corp_code", ""))
+    try:
+        payload = client.get_json(
+            "adtServcCnclsSttus.json",
+            corp_code=row.get("corp_code", ""),
+            bsns_year=row.get("year", ""),
+            reprt_code="11011",
+        )
+    except DartError as exc:
+        return key, None, str(exc)
+    parsed = parse_audit_service_api_rows(payload.get("list", []) or [])
+    return key, parsed, "" if parsed else "audit_service_unavailable"
+
+
 def parse_financial_amount(value: Any) -> float | None:
     text = str(value or "").strip().replace(",", "")
     if not text:
@@ -700,13 +773,50 @@ def main() -> int:
             "fnlttSinglAcntAll" if row.get("revenue") else ""
         )
 
+    audit_api_targets = [
+        row
+        for row in selected_rows
+        if not row.get("auditor_raw", "").strip()
+        or parse_number(row.get("audit_contract_fee")) is None
+        or (row.get("year", ""), row.get("corp_code", "")) in changed_receipts
+    ]
+    print(f"structured audit-service targets: {len(audit_api_targets):,}")
+    audit_api_results = run_parallel(
+        lambda row: fetch_audit_service_api(client, row),
+        audit_api_targets,
+        args.workers,
+    )
+    by_key = {(row.get("year", ""), row.get("corp_code", "")): row for row in rows}
+    for key, result, error in audit_api_results:
+        row = by_key[key]
+        if not result:
+            if error and error != "audit_service_unavailable":
+                append_warning(row, error)
+            continue
+        if result.get("auditor"):
+            row["auditor_raw"] = str(result["auditor"])
+            row["auditor_group"] = normalize_auditor(row["auditor_raw"])
+            row["auditor_source"] = "adtServcCnclsSttus"
+        replacements = (
+            ("audit_contract_fee", "contract_fee"),
+            ("audit_actual_fee", "actual_fee"),
+            ("audit_contract_hours", "contract_hours"),
+            ("audit_actual_hours", "actual_hours"),
+        )
+        replaced_fee = False
+        for target, source in replacements:
+            if result.get(source) is not None:
+                row[target] = format_number(result[source])
+                replaced_fee = True
+        if replaced_fee:
+            row["fee_source"] = "adtServcCnclsSttus"
+        for warning in result.get("warnings", []):
+            append_warning(row, warning)
+
     document_targets = [
         row
         for row in selected_rows
-        if document_needs_reconciliation(
-            row,
-            (row.get("year", ""), row.get("corp_code", "")) in changed_receipts,
-        )
+        if document_needs_reconciliation(row, False)
     ]
     print(f"source filing reconciliation targets: {len(document_targets):,}")
     document_results = run_parallel(
@@ -714,7 +824,6 @@ def main() -> int:
         document_targets,
         args.workers,
     )
-    by_key = {(row.get("year", ""), row.get("corp_code", "")): row for row in rows}
     for key, result, error in document_results:
         row = by_key[key]
         if result:
