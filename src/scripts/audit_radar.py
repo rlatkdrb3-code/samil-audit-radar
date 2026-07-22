@@ -1256,12 +1256,14 @@ def annual_report_document_history_row(
     evidence, conflict = current_auditor_document_evidence(raw_document)
     evidence_types = {item["evidence_type"] for item in evidence}
     auditor_keys = {item["auditor_key"] for item in evidence}
+    period_keys = {item["period_key"] for item in evidence}
     if (
         conflict
         or "audit_service_table" not in evidence_types
         or "audit_opinion_table" not in evidence_types
         or len(evidence) < 2
         or len(auditor_keys) != 1
+        or len(period_keys) != 1
     ):
         return None
     auditor = evidence[0]["auditor"]
@@ -1286,6 +1288,7 @@ def annual_report_document_history_row(
         "source_detail": "사업보고서 원문 document.xml",
         "source_note": f"구조화 API 공백을 사업보고서 원문의 감사의견·감사용역 표 {len(evidence)}개가 일치한 경우에만 보완했습니다.",
         "evidence_types": sorted(evidence_types),
+        "period_keys": sorted(period_keys),
         "period_labels": sorted({item["period_label"] for item in evidence}),
     }
 
@@ -1354,10 +1357,14 @@ def current_auditor_document_evidence(
             conflict = True
             continue
         _, period_label, auditor = current_candidates[0]
+        period_key = document_period_key(period_label)
+        if not period_key:
+            continue
         evidence.append(
             {
                 "evidence_type": evidence_type,
                 "period_label": period_label,
+                "period_key": period_key,
                 "auditor": auditor,
                 "auditor_key": normalize_auditor(auditor),
             }
@@ -1376,6 +1383,19 @@ def document_period_rank(period_label: str) -> int | None:
     if year_match:
         return int(year_match.group(1))
     return None
+
+
+def document_period_key(period_label: str) -> str:
+    compact = re.sub(r"\s+", "", period_label or "")
+    term_match = re.search(r"제(\d+)기", compact)
+    if term_match:
+        return f"term:{int(term_match.group(1))}"
+    if "당기" in compact:
+        return "current"
+    year_match = re.search(r"(20\d{2})", compact)
+    if year_match:
+        return f"year:{year_match.group(1)}"
+    return ""
 
 
 def valid_document_auditor_cell(value: str) -> bool:
@@ -1778,9 +1798,10 @@ def select_current_period_rows(
         ]
         if explicit_year:
             return explicit_year
+    unmarked = [row for row in valid if not is_prior_period_row(row)]
     term_rows = [
         (period_term_number(row.get("bsns_year", "")), row)
-        for row in valid
+        for row in unmarked
     ]
     numbered = [(number, row) for number, row in term_rows if number is not None]
     if numbered:
@@ -1788,7 +1809,7 @@ def select_current_period_rows(
         candidates = [row for number, row in numbered if number == max_term]
         if len(candidates) == 1:
             return candidates
-    return valid if len(valid) == 1 else []
+    return unmarked if len(unmarked) == 1 else []
 
 
 def is_meaningful_value(value: Any) -> bool:
@@ -1799,6 +1820,11 @@ def is_meaningful_value(value: Any) -> bool:
 def is_current_period_row(row: dict[str, Any]) -> bool:
     label = re.sub(r"\s+", "", str(row.get("bsns_year", "")))
     return "당기" in label
+
+
+def is_prior_period_row(row: dict[str, Any]) -> bool:
+    label = re.sub(r"\s+", "", str(row.get("bsns_year", "")))
+    return "당기" not in label and "전기" in label
 
 
 def normalize_disclosure_row(row: dict[str, Any], business_year: int) -> dict[str, Any]:

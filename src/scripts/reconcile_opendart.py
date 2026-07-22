@@ -354,6 +354,42 @@ def reporting_period_rank(value: str) -> int | None:
     return None
 
 
+def reporting_period_key(value: str) -> str:
+    compact = re.sub(r"\s+", "", value or "")
+    term_match = re.search(r"제(\d+)기", compact)
+    if term_match:
+        return f"term:{int(term_match.group(1))}"
+    if "당기" in compact:
+        return "current"
+    year_match = re.search(r"(20\d{2})", compact)
+    if year_match:
+        return f"year:{year_match.group(1)}"
+    return ""
+
+
+def structured_period_rank(
+    value: str,
+    report_year: str | int | None = None,
+) -> int | None:
+    """Rank a structured API row without treating prior-period labels as current."""
+    compact = re.sub(r"\s+", "", value or "")
+    if "당기" in compact:
+        return 1_000_000
+
+    year_match = re.search(r"(20\d{2})", compact)
+    expected_year = str(report_year or "").strip()
+    if expected_year and year_match:
+        if year_match.group(1) != expected_year:
+            return None
+        return int(year_match.group(1))
+
+    # `제N기(전기/전전기)` alone identifies only a prior relative period.  Its
+    # term number must not be promoted to the requested business year.
+    if "전기" in compact:
+        return None
+    return reporting_period_rank(compact)
+
+
 def auditor_identity(value: str) -> str:
     cleaned = clean_text(value).lower()
     cleaned = re.sub(r"\([^)]*\)", "", cleaned)
@@ -406,8 +442,12 @@ def parse_audit_service_table(raw: str) -> dict[str, Any] | None:
             auditor = cells[auditor_index].strip()
             if len(re.findall(r"(?:회계법인|감사반)", auditor)) != 1:
                 continue
-            score = reporting_period_rank(cells[period_index])
+            period_label = cells[period_index].strip()
+            score = reporting_period_rank(period_label)
             if score is None:
+                continue
+            period_key = reporting_period_key(period_label)
+            if not period_key:
                 continue
             contract_cell = cells[auditor_index + 2] if auditor_index + 2 < len(cells) else ""
             actual_cell = cells[auditor_index + 4] if auditor_index + 4 < len(cells) else ""
@@ -420,6 +460,8 @@ def parse_audit_service_table(raw: str) -> dict[str, Any] | None:
                     score,
                     {
                         "auditor": auditor,
+                        "period_label": period_label,
+                        "period_key": period_key,
                         "contract_fee": contract_fee,
                         "actual_fee": actual_fee,
                         "contract_hours": contract_hours,
@@ -440,9 +482,9 @@ def parse_audit_service_table(raw: str) -> dict[str, Any] | None:
     return None
 
 
-def parse_auditor_from_opinion_table(raw: str) -> str:
+def parse_auditor_evidence_from_opinion_table(raw: str) -> dict[str, str] | None:
     table_starts = [match.start() for match in re.finditer(r"<TABLE\b", raw, flags=re.I)]
-    table_auditors: list[str] = []
+    table_evidence: list[dict[str, str]] = []
     for table_start in table_starts:
         table_end = raw.find("</TABLE>", table_start)
         if table_end < 0:
@@ -458,7 +500,7 @@ def parse_auditor_from_opinion_table(raw: str) -> str:
             continue
         body = table[body_start if body_start >= 0 else 0 :]
         rows = re.findall(r"<TR\b.*?</TR>", body, flags=re.I | re.S)
-        scored: list[tuple[int, str]] = []
+        scored: list[tuple[int, str, str]] = []
         for row_html in rows:
             cells = table_cells(row_html)
             period_index, auditor_index = columns
@@ -467,20 +509,40 @@ def parse_auditor_from_opinion_table(raw: str) -> str:
             auditor = cells[auditor_index].strip()
             if len(re.findall(r"(?:회계법인|감사반)", auditor)) != 1:
                 continue
-            score = reporting_period_rank(cells[period_index])
+            period_label = cells[period_index].strip()
+            score = reporting_period_rank(period_label)
             if score is None:
                 continue
-            scored.append((score, auditor))
+            period_key = reporting_period_key(period_label)
+            if not period_key:
+                continue
+            scored.append((score, period_label, auditor))
         if scored:
             maximum_rank = max(item[0] for item in scored)
-            current = [item[1] for item in scored if item[0] == maximum_rank]
-            identities = {auditor_identity(item) for item in current}
-            if len(identities) != 1:
-                return ""
-            table_auditors.append(current[0])
+            current = [item for item in scored if item[0] == maximum_rank]
+            identities = {auditor_identity(item[2]) for item in current}
+            period_keys = {reporting_period_key(item[1]) for item in current}
+            if len(identities) != 1 or len(period_keys) != 1:
+                return None
+            _, period_label, auditor = current[0]
+            table_evidence.append(
+                {
+                    "auditor": auditor,
+                    "period_label": period_label,
+                    "period_key": reporting_period_key(period_label),
+                }
+            )
 
-    identities = {auditor_identity(item) for item in table_auditors}
-    return table_auditors[0] if table_auditors and len(identities) == 1 else ""
+    identities = {auditor_identity(item["auditor"]) for item in table_evidence}
+    period_keys = {item["period_key"] for item in table_evidence}
+    if not table_evidence or len(identities) != 1 or len(period_keys) != 1:
+        return None
+    return table_evidence[0]
+
+
+def parse_auditor_from_opinion_table(raw: str) -> str:
+    evidence = parse_auditor_evidence_from_opinion_table(raw)
+    return evidence["auditor"] if evidence else ""
 
 
 def document_needs_reconciliation(row: dict[str, str], receipt_changed: bool) -> bool:
@@ -505,15 +567,22 @@ def reconcile_document(
     try:
         raw = client.get_document(receipt)
         audit = parse_audit_service_table(raw) or {}
-        opinion_auditor = parse_auditor_from_opinion_table(raw)
+        opinion_evidence = parse_auditor_evidence_from_opinion_table(raw) or {}
+        opinion_auditor = str(opinion_evidence.get("auditor") or "").strip()
         service_auditor = str(audit.get("auditor") or "").strip()
         if service_auditor and opinion_auditor:
             if auditor_identity(service_auditor) != auditor_identity(opinion_auditor):
                 audit["auditor"] = ""
                 audit["auditor_conflict"] = True
                 audit.setdefault("warnings", []).append("auditor_source_conflict")
-        elif not service_auditor:
-            audit["auditor"] = opinion_auditor
+            elif audit.get("period_key") != opinion_evidence.get("period_key"):
+                audit["auditor"] = ""
+                audit["auditor_conflict"] = True
+                audit.setdefault("warnings", []).append("auditor_period_conflict")
+        elif service_auditor:
+            # A service-table name alone is not sufficient document evidence.
+            audit["auditor"] = ""
+            audit.setdefault("warnings", []).append("auditor_cross_table_unverified")
         if not audit.get("auditor") and not any(
             audit.get(field) is not None
             for field in ("contract_fee", "actual_fee")
@@ -524,10 +593,16 @@ def reconcile_document(
         return key, None, str(exc)
 
 
-def parse_audit_service_api_rows(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+def parse_audit_service_api_rows(
+    rows: list[dict[str, Any]],
+    report_year: str | int | None = None,
+) -> dict[str, Any] | None:
     candidates: list[tuple[int, dict[str, Any]]] = []
     for row in rows:
-        rank = reporting_period_rank(str(row.get("bsns_year") or ""))
+        rank = structured_period_rank(
+            str(row.get("bsns_year") or ""),
+            report_year,
+        )
         if rank is None:
             continue
         auditor = clean_text(str(row.get("adtor") or ""))
@@ -606,7 +681,10 @@ def fetch_audit_service_api(
         )
     except DartError as exc:
         return key, None, str(exc)
-    parsed = parse_audit_service_api_rows(payload.get("list", []) or [])
+    parsed = parse_audit_service_api_rows(
+        payload.get("list", []) or [],
+        report_year=row.get("year", ""),
+    )
     return key, parsed, "" if parsed else "audit_service_unavailable"
 
 

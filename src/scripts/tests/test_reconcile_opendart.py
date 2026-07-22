@@ -104,6 +104,123 @@ class ReconcileUniverseTests(unittest.TestCase):
         self.assertEqual(parsed["contract_hours"], 10_000)
         self.assertEqual(parsed["actual_hours"], 10_500)
 
+    def test_structured_prior_term_rows_are_not_promoted_to_report_year(self):
+        rows = [
+            {
+                "bsns_year": "제58기(전기)",
+                "adtor": "과거회계법인",
+                "adt_cntrct_dtls_mendng": "100백만원",
+            },
+            {
+                "bsns_year": "제57기(전전기)",
+                "adtor": "더과거회계법인",
+                "adt_cntrct_dtls_mendng": "90백만원",
+            },
+        ]
+
+        self.assertIsNone(
+            reconcile.parse_audit_service_api_rows(rows, report_year=2025)
+        )
+
+    def test_structured_explicit_report_year_is_selected_over_prior_terms(self):
+        rows = [
+            {
+                "bsns_year": "제58기(전기)",
+                "adtor": "과거회계법인",
+                "adt_cntrct_dtls_mendng": "90백만원",
+            },
+            {
+                "bsns_year": "2025 사업연도",
+                "adtor": "현재회계법인",
+                "adt_cntrct_dtls_mendng": "100백만원",
+            },
+        ]
+
+        parsed = reconcile.parse_audit_service_api_rows(rows, report_year=2025)
+
+        self.assertEqual(parsed["auditor"], "현재회계법인")
+
+    def test_document_auditor_requires_matching_period_keys(self):
+        document = """
+        <TABLE><THEAD><TR><TH>사업연도</TH><TH>감사인</TH><TH>감사계약내역</TH><TH>보수</TH><TH>시간</TH><TH>실제수행내역</TH></TR></THEAD><TBODY>
+        <TR><TD>제58기</TD><TD>현재회계법인</TD><TD>감사</TD><TD>100백만원</TD><TD>1,000</TD><TD>100백만원</TD><TD>1,000</TD></TR>
+        </TBODY></TABLE>
+        <TABLE><THEAD><TR><TH>사업연도</TH><TH>감사인</TH><TH>감사의견</TH></TR></THEAD><TBODY>
+        <TR><TD>제57기</TD><TD>현재회계법인</TD><TD>적정</TD></TR>
+        </TBODY></TABLE>
+        """
+
+        class Client:
+            def get_document(self, receipt):
+                self.receipt = receipt
+                return document
+
+        _, parsed, error = reconcile.reconcile_document(
+            Client(),
+            {
+                "year": "2025",
+                "corp_code": "00000001",
+                "source_rcept_no": "20260301000001",
+            },
+        )
+
+        self.assertEqual(error, "")
+        self.assertEqual(parsed["period_key"], "term:58")
+        self.assertEqual(parsed["auditor"], "")
+        self.assertTrue(parsed["auditor_conflict"])
+        self.assertIn("auditor_period_conflict", parsed["warnings"])
+
+    def test_document_auditor_is_confirmed_when_both_tables_match(self):
+        document = """
+        <TABLE><THEAD><TR><TH>사업연도</TH><TH>감사인</TH><TH>감사계약내역</TH><TH>보수</TH><TH>시간</TH><TH>실제수행내역</TH></TR></THEAD><TBODY>
+        <TR><TD>제58기(당기)</TD><TD>현재회계법인</TD><TD>감사</TD><TD>100백만원</TD><TD>1,000</TD><TD>100백만원</TD><TD>1,000</TD></TR>
+        </TBODY></TABLE>
+        <TABLE><THEAD><TR><TH>사업연도</TH><TH>감사인</TH><TH>감사의견</TH></TR></THEAD><TBODY>
+        <TR><TD>제58기</TD><TD>현재회계법인</TD><TD>적정</TD></TR>
+        </TBODY></TABLE>
+        """
+
+        class Client:
+            def get_document(self, receipt):
+                return document
+
+        _, parsed, error = reconcile.reconcile_document(
+            Client(),
+            {
+                "year": "2025",
+                "corp_code": "00000001",
+                "source_rcept_no": "20260301000001",
+            },
+        )
+
+        self.assertEqual(error, "")
+        self.assertEqual(parsed["period_key"], "term:58")
+        self.assertEqual(parsed["auditor"], "현재회계법인")
+
+    def test_document_service_table_alone_does_not_confirm_auditor(self):
+        document = """
+        <TABLE><THEAD><TR><TH>사업연도</TH><TH>감사인</TH><TH>감사계약내역</TH><TH>보수</TH><TH>시간</TH><TH>실제수행내역</TH></TR></THEAD><TBODY>
+        <TR><TD>제58기</TD><TD>단독회계법인</TD><TD>감사</TD><TD>100백만원</TD><TD>1,000</TD><TD>100백만원</TD><TD>1,000</TD></TR>
+        </TBODY></TABLE>
+        """
+
+        class Client:
+            def get_document(self, receipt):
+                return document
+
+        _, parsed, error = reconcile.reconcile_document(
+            Client(),
+            {
+                "year": "2025",
+                "corp_code": "00000001",
+                "source_rcept_no": "20260301000001",
+            },
+        )
+
+        self.assertEqual(error, "")
+        self.assertEqual(parsed["auditor"], "")
+        self.assertIn("auditor_cross_table_unverified", parsed["warnings"])
+
     def test_parallel_row_failure_does_not_abort_the_batch(self):
         rows = [
             {"year": "2025", "corp_code": "ok"},

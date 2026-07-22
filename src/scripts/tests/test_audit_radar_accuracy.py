@@ -124,6 +124,16 @@ class AuditRadarAccuracyTests(unittest.TestCase):
             [],
         )
 
+    def test_numbered_prior_period_rows_are_not_promoted_to_current_year(self):
+        rows = [
+            {"bsns_year": "제58기 (전기)", "adtor": "A회계법인"},
+            {"bsns_year": "제57기 (전전기)", "adtor": "A회계법인"},
+        ]
+        self.assertEqual(
+            radar.select_current_period_rows(rows, report_year=2025),
+            [],
+        )
+
     def test_filing_submitter_is_not_used_as_auditor(self):
         row = radar.filing_to_history_row(
             {
@@ -196,6 +206,7 @@ class AuditRadarAccuracyTests(unittest.TestCase):
         self.assertEqual(row["adtor"], "삼정회계법인")
         self.assertEqual(row["source_kind"], "annual_report_document")
         self.assertTrue(row["auditor_verified"])
+        self.assertEqual(row["period_keys"], ["term:58"])
 
         mismatching_document = matching_document.replace(
             "<TD>삼정회계법인</TD><TD>적정</TD>",
@@ -203,6 +214,17 @@ class AuditRadarAccuracyTests(unittest.TestCase):
         )
         self.assertIsNone(
             radar.annual_report_document_history_row(filing, mismatching_document)
+        )
+
+        mismatching_period_document = matching_document.replace(
+            "<TD>제58기 (당기)</TD><TD>삼정회계법인</TD><TD>적정</TD>",
+            "<TD>제57기 (전기)</TD><TD>삼정회계법인</TD><TD>적정</TD>",
+        )
+        self.assertIsNone(
+            radar.annual_report_document_history_row(
+                filing,
+                mismatching_period_document,
+            )
         )
 
     def test_structured_api_wins_over_document_fallback_for_same_year(self):
