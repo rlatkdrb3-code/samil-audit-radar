@@ -52,7 +52,7 @@ RESPONSE_CACHE_TTL_SECONDS = 60 * 60
 ROOT = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = ROOT.parent
 MARKET_SHARE_HTML = ROOT / "web" / "market_share.html"
-MARKET_SHARE_CSV = ROOT / "examples" / "audit_market_2023_2024_annual_report_all.csv"
+MARKET_SHARE_CSV = ROOT / "examples" / "audit_market_annual_report_snapshot.csv"
 MARKET_REFRESH_OUTPUT = Path("/tmp/audit_market_2023_2025_annual_report_all.csv")
 PROCESS_TO_AX_HTML = ROOT / "web" / "process_to_ax.html"
 CACHE_DIR = PROJECT_ROOT / ".cache"
@@ -4114,6 +4114,8 @@ def start_market_refresh() -> dict[str, Any]:
             "2025",
             "--workers",
             "6",
+            "--force-audit-refresh",
+            "--skip-revenue",
         ]
         try:
             result = subprocess.run(
