@@ -67,7 +67,10 @@ UNIT_MULTIPLIERS = {
     "원": 1,
 }
 UNIT_ORDER = tuple(UNIT_MULTIPLIERS)
-FOREIGN_CURRENCY_RE = re.compile(r"\b(?:USD|CNY|JPY|EUR|HKD|SGD|GBP)\b", re.I)
+FOREIGN_CURRENCY_RE = re.compile(
+    r"\b(?:USD|CNY|CNH|RMB|JPY|EUR|HKD|SGD|GBP)\b|(?:인민폐|위안)",
+    re.I,
+)
 FISCAL_YEAR_RE_TEMPLATE = r"사업보고서\s*\(\s*{year}\.(?:0?[1-9]|1[0-2])\s*\)"
 
 
@@ -296,14 +299,27 @@ def context_unit(raw: str) -> str:
 def parse_money(cell: str, unit: str) -> tuple[float | None, str | None]:
     if FOREIGN_CURRENCY_RE.search(cell):
         return None, "foreign_currency_fee"
-    match = re.search(r"(?<!\d)(\d[\d,]*(?:\.\d+)?)", cell)
+    match = re.search(r"(?<![\d.,])(\d[\d,.]*\d|\d)(?![\d.,])", cell)
     if not match:
         return None, None
-    raw = float(match.group(1).replace(",", ""))
+    token = match.group(1)
+    if re.fullmatch(r"\d{1,3}(?:\.\d{3})+", token):
+        raw = float(token.replace(".", ""))
+    else:
+        try:
+            raw = float(token.replace(",", ""))
+        except ValueError:
+            return None, None
     tail = cell[match.end() : match.end() + 20].replace(" ", "")
     explicit = next((candidate for candidate in UNIT_ORDER if tail.startswith(candidate)), None)
     if explicit:
         return raw * UNIT_MULTIPLIERS[explicit], None
+
+    # The table-level unit is part of the source disclosure and takes priority
+    # over magnitude heuristics.  For example, 1,197,000 in a '천원' table is
+    # KRW 1,197,000,000, not KRW 1,197,000.
+    if unit:
+        return raw * UNIT_MULTIPLIERS[unit], None
 
     # Some reports carry stale or malformed unit metadata. These magnitude
     # guards match the common DART representations: won, thousand won, million won.
@@ -311,8 +327,6 @@ def parse_money(cell: str, unit: str) -> tuple[float | None, str | None]:
         return raw, None
     if raw >= 10_000:
         return raw * 1_000, None
-    if unit:
-        return raw * UNIT_MULTIPLIERS[unit], None
     return raw * 1_000_000, None
 
 

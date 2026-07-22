@@ -9,11 +9,11 @@ Use only publicly disclosed OpenDART annual-report data and state the observatio
 
 ## Workflow
 
-1. Inspect `examples/audit_market_2023_2024_annual_report_all.csv` before answering.
+1. Inspect `examples/audit_market_annual_report_snapshot.csv` before answering.
 2. Use `scripts/reconcile_opendart.py` when new annual-report extracts must be normalized or combined. Run `--help` first and preserve the source files.
 3. Report market share primarily by audited-company count unless the user supplies a validated revenue metric. Never label company-count share as revenue share.
 4. Distinguish missing filings, API gaps, and non-subject companies from confirmed zero values.
-5. Open `web/index.html` when the user requests the interactive dashboard.
+5. Open `web/market_share.html` when the user requests the interactive dashboard.
 6. Include data limitations and do not infer audit quality, independence, or future appointments from market share.
 
 ## Output

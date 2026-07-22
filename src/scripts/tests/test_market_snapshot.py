@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[3]
-SNAPSHOT = ROOT / "src" / "examples" / "audit_market_2023_2024_annual_report_all.csv"
+SNAPSHOT = ROOT / "src" / "examples" / "audit_market_annual_report_snapshot.csv"
 GROUPS = (
     "samil_pwc",
     "samjong_kpmg",
@@ -44,7 +44,7 @@ class MarketSnapshotTests(unittest.TestCase):
 
     def test_snapshot_has_exact_current_filing_universe(self):
         counts = Counter(row["year"] for row in self.rows)
-        self.assertEqual(counts, {"2023": 3234, "2024": 3323})
+        self.assertEqual(counts, {"2023": 3234, "2024": 3323, "2025": 3343})
         keys = [(row["year"], row["corp_code"]) for row in self.rows]
         self.assertEqual(len(keys), len(set(keys)))
         self.assertTrue(all(row["source_rcept_no"] for row in self.rows))

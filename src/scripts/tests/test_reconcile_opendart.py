@@ -118,6 +118,17 @@ class ReconcileUniverseTests(unittest.TestCase):
         self.assertEqual(reconcile.parse_hours("40,370"), 40370)
         self.assertEqual(reconcile.parse_hours("1,200.00"), 1200)
 
+    def test_money_honors_table_unit_and_korean_thousands_separators(self):
+        self.assertEqual(reconcile.parse_money("65.000", "천원"), (65_000_000, None))
+        self.assertEqual(
+            reconcile.parse_money("1,197,000", "천원"),
+            (1_197_000_000, None),
+        )
+        self.assertEqual(
+            reconcile.parse_money("RMB 1,400,000", ""),
+            (None, "foreign_currency_fee"),
+        )
+
     def test_structured_audit_rows_choose_current_term_and_parse_units(self):
         rows = [
             {

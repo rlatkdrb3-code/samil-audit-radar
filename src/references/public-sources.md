@@ -72,6 +72,6 @@ This plugin is grounded in public audit disclosure and auditor appointment rules
 - FSS 2025 external-audit target-company count: https://www.fss.or.kr/fss/bbs/B0000188/view.do?nttId=212401&menuNo=200218
   - Reports the newer historical count of 42,891 companies at the end of 2025.
 - Dashboard snapshot validation date: 2026-07-23.
-  - Current annual-report-filer universe: 3,234 companies for 2023 and 3,323 for 2024.
+  - Current annual-report-filer universe: 3,234 companies for 2023, 3,323 for 2024, and 3,343 for 2025.
   - Rows with unresolved source-document reconciliation are excluded per metric when the numeric field is absent; negative and non-finite amounts are never included.
   - The 2024 client revenue metric covers 2,876/3,323 companies and mixes the selected disclosed revenue/income account and consolidation scope, so it is labeled as a supplemental metric.
