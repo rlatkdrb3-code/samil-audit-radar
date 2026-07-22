@@ -317,10 +317,15 @@ def parse_money(cell: str, unit: str) -> tuple[float | None, str | None]:
 
 
 def parse_hours(cell: str) -> int | None:
-    match = re.search(r"(?<!\d)(\d[\d,]*)", cell)
+    match = re.search(r"(?<!\d)(\d[\d,.]*)", cell)
     if not match:
         return None
-    return int(match.group(1).replace(",", ""))
+    value = match.group(1).rstrip(".,")
+    if re.fullmatch(r"\d{1,3}(?:[,.]\d{3})+", value):
+        return int(re.sub(r"[,.]", "", value))
+    if re.fullmatch(r"\d+(?:\.\d+)?", value):
+        return round(float(value))
+    return int(value.replace(",", ""))
 
 
 def table_cells(row_html: str) -> list[str]:
@@ -332,6 +337,42 @@ def table_cells(row_html: str) -> list[str]:
     return [clean_text(value) for value in values]
 
 
+def reporting_period_rank(value: str) -> int | None:
+    compact = re.sub(r"\s+", "", value or "")
+    if "당기" in compact:
+        return 1_000_000
+    term_match = re.search(r"제(\d+)기", compact)
+    if term_match:
+        return int(term_match.group(1))
+    year_match = re.search(r"(20\d{2})", compact)
+    if year_match:
+        return int(year_match.group(1))
+    return None
+
+
+def auditor_identity(value: str) -> str:
+    cleaned = clean_text(value).lower()
+    cleaned = re.sub(r"\([^)]*\)", "", cleaned)
+    cleaned = re.sub(r"(?:유한회사|회계법인|감사반|법인|주식회사|㈜)", "", cleaned)
+    return re.sub(r"[^0-9a-z가-힣]", "", cleaned)
+
+
+def primary_table_columns(header: str) -> tuple[int, int] | None:
+    for header_row in re.findall(r"<TR\b.*?</TR>", header, flags=re.I | re.S):
+        cells = table_cells(header_row)
+        period_index = next(
+            (index for index, value in enumerate(cells) if "사업연도" in value),
+            None,
+        )
+        auditor_index = next(
+            (index for index, value in enumerate(cells) if value.strip() == "감사인"),
+            None,
+        )
+        if period_index is not None and auditor_index is not None:
+            return period_index, auditor_index
+    return None
+
+
 def parse_audit_service_table(raw: str) -> dict[str, Any] | None:
     table_starts = [match.start() for match in re.finditer(r"<TABLE\b", raw, flags=re.I)]
     for table_start in table_starts:
@@ -340,16 +381,29 @@ def parse_audit_service_table(raw: str) -> dict[str, Any] | None:
             continue
         table = raw[table_start : table_end + len("</TABLE>")]
         body_start = table.upper().find("<TBODY")
-        header = clean_text(table[: body_start if body_start >= 0 else len(table)])
-        if "감사계약내역" not in header or "실제수행내역" not in header:
+        header_html = table[: body_start if body_start >= 0 else len(table)]
+        header = clean_text(header_html)
+        if not all(
+            label in header
+            for label in ("사업연도", "감사인", "감사계약내역", "실제수행내역")
+        ):
+            continue
+        columns = primary_table_columns(header_html)
+        if columns is None:
             continue
         unit = context_unit(raw[max(0, table_start - 2500) : table_start])
         body = table[body_start if body_start >= 0 else 0 :]
         candidates: list[tuple[int, dict[str, Any]]] = []
         for row_html in re.findall(r"<TR\b.*?</TR>", body, flags=re.I | re.S):
             cells = table_cells(row_html)
-            auditor_index = next((i for i, cell in enumerate(cells) if "회계법인" in cell), None)
-            if auditor_index is None:
+            period_index, auditor_index = columns
+            if max(period_index, auditor_index) >= len(cells):
+                continue
+            auditor = cells[auditor_index].strip()
+            if len(re.findall(r"(?:회계법인|감사반)", auditor)) != 1:
+                continue
+            score = reporting_period_rank(cells[period_index])
+            if score is None:
                 continue
             contract_cell = cells[auditor_index + 2] if auditor_index + 2 < len(cells) else ""
             actual_cell = cells[auditor_index + 4] if auditor_index + 4 < len(cells) else ""
@@ -357,13 +411,11 @@ def parse_audit_service_table(raw: str) -> dict[str, Any] | None:
             actual_fee, actual_warning = parse_money(actual_cell, unit)
             contract_hours = parse_hours(cells[auditor_index + 3]) if auditor_index + 3 < len(cells) else None
             actual_hours = parse_hours(cells[auditor_index + 5]) if auditor_index + 5 < len(cells) else None
-            period = cells[0] if cells else ""
-            score = 3 if "당기" in period else 2 if re.search(r"제\s*\d+\s*기", period) else 1
             candidates.append(
                 (
                     score,
                     {
-                        "auditor": cells[auditor_index],
+                        "auditor": auditor,
                         "contract_fee": contract_fee,
                         "actual_fee": actual_fee,
                         "contract_hours": contract_hours,
@@ -377,45 +429,54 @@ def parse_audit_service_table(raw: str) -> dict[str, Any] | None:
                 )
             )
         if candidates:
-            return max(candidates, key=lambda item: item[0])[1]
+            maximum_rank = max(item[0] for item in candidates)
+            current = [item[1] for item in candidates if item[0] == maximum_rank]
+            if len({auditor_identity(item["auditor"]) for item in current}) == 1:
+                return current[0]
     return None
 
 
 def parse_auditor_from_opinion_table(raw: str) -> str:
     table_starts = [match.start() for match in re.finditer(r"<TABLE\b", raw, flags=re.I)]
+    table_auditors: list[str] = []
     for table_start in table_starts:
         table_end = raw.find("</TABLE>", table_start)
         if table_end < 0:
             continue
         table = raw[table_start : table_end + len("</TABLE>")]
         body_start = table.upper().find("<TBODY")
-        header = clean_text(table[: body_start if body_start >= 0 else len(table)])
-        if "감사인" not in header or "감사의견" not in header:
+        header_html = table[: body_start if body_start >= 0 else len(table)]
+        header = clean_text(header_html)
+        if not all(label in header for label in ("사업연도", "감사인", "감사의견")):
+            continue
+        columns = primary_table_columns(header_html)
+        if columns is None:
             continue
         body = table[body_start if body_start >= 0 else 0 :]
         rows = re.findall(r"<TR\b.*?</TR>", body, flags=re.I | re.S)
         scored: list[tuple[int, str]] = []
         for row_html in rows:
             cells = table_cells(row_html)
-            auditor = next((cell for cell in cells if "회계법인" in cell), "")
-            if not auditor:
+            period_index, auditor_index = columns
+            if max(period_index, auditor_index) >= len(cells):
                 continue
-            period = cells[0] if cells else ""
-            score = 3 if "당기" in period else 2 if re.search(r"제\s*\d+\s*기", period) else 1
+            auditor = cells[auditor_index].strip()
+            if len(re.findall(r"(?:회계법인|감사반)", auditor)) != 1:
+                continue
+            score = reporting_period_rank(cells[period_index])
+            if score is None:
+                continue
             scored.append((score, auditor))
         if scored:
-            return max(scored, key=lambda item: item[0])[1]
+            maximum_rank = max(item[0] for item in scored)
+            current = [item[1] for item in scored if item[0] == maximum_rank]
+            identities = {auditor_identity(item) for item in current}
+            if len(identities) != 1:
+                return ""
+            table_auditors.append(current[0])
 
-    flat = clean_text(raw)
-    patterns = (
-        r"사업연도\s+감사인.{0,500}?제\s*\d+\s*기(?:\s*\([^)]*당기[^)]*\))?.{0,100}?([가-힣A-Za-z0-9&· ]+회계법인)",
-        r"제\s*\d+\s*기\s*\([^)]*당기[^)]*\).{0,100}?([가-힣A-Za-z0-9&· ]+회계법인)",
-    )
-    for pattern in patterns:
-        match = re.search(pattern, flat)
-        if match:
-            return match.group(1).strip()
-    return ""
+    identities = {auditor_identity(item) for item in table_auditors}
+    return table_auditors[0] if table_auditors and len(identities) == 1 else ""
 
 
 def document_needs_reconciliation(row: dict[str, str], receipt_changed: bool) -> bool:
@@ -440,8 +501,15 @@ def reconcile_document(
     try:
         raw = client.get_document(receipt)
         audit = parse_audit_service_table(raw) or {}
-        if not audit.get("auditor"):
-            audit["auditor"] = parse_auditor_from_opinion_table(raw)
+        opinion_auditor = parse_auditor_from_opinion_table(raw)
+        service_auditor = str(audit.get("auditor") or "").strip()
+        if service_auditor and opinion_auditor:
+            if auditor_identity(service_auditor) != auditor_identity(opinion_auditor):
+                audit["auditor"] = ""
+                audit["auditor_conflict"] = True
+                audit.setdefault("warnings", []).append("auditor_source_conflict")
+        elif not service_auditor:
+            audit["auditor"] = opinion_auditor
         if not audit.get("auditor") and not any(
             audit.get(field) is not None
             for field in ("contract_fee", "actual_fee")
@@ -650,6 +718,10 @@ def main() -> int:
     for key, result, error in document_results:
         row = by_key[key]
         if result:
+            if result.get("auditor_conflict"):
+                row["auditor_raw"] = ""
+                row["auditor_group"] = "other_or_unknown"
+                row["auditor_source"] = ""
             if result.get("auditor"):
                 row["auditor_raw"] = str(result["auditor"])
                 row["auditor_group"] = normalize_auditor(row["auditor_raw"])

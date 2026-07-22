@@ -45,6 +45,39 @@ class ReconcileUniverseTests(unittest.TestCase):
         self.assertEqual(coverage, 1)
         self.assertEqual(big4_share, 100.0)
 
+    def test_primary_tables_choose_unique_maximum_term(self):
+        document = """
+        <TABLE><THEAD><TR><TH>사업연도</TH><TH>감사인</TH><TH>감사계약내역</TH><TH>보수</TH><TH>시간</TH><TH>실제수행내역</TH></TR></THEAD><TBODY>
+        <TR><TD>제57기</TD><TD>과거회계법인</TD><TD>감사</TD><TD>90백만원</TD><TD>900</TD><TD>90백만원</TD><TD>900</TD></TR>
+        <TR><TD>제58기</TD><TD>현재회계법인</TD><TD>감사</TD><TD>100백만원</TD><TD>1,000</TD><TD>100백만원</TD><TD>1,000</TD></TR>
+        </TBODY></TABLE>
+        <TABLE><THEAD><TR><TH>사업연도</TH><TH>감사인</TH><TH>감사의견</TH></TR></THEAD><TBODY>
+        <TR><TD>제57기</TD><TD>과거회계법인</TD><TD>적정</TD></TR>
+        <TR><TD>제58기</TD><TD>현재회계법인</TD><TD>적정</TD></TR>
+        </TBODY></TABLE>
+        """
+        service = reconcile.parse_audit_service_table(document)
+        self.assertEqual(service["auditor"], "현재회계법인")
+        self.assertEqual(
+            reconcile.parse_auditor_from_opinion_table(document),
+            "현재회계법인",
+        )
+
+    def test_opinion_tables_reject_current_auditor_conflict(self):
+        document = """
+        <TABLE><THEAD><TR><TH>사업연도</TH><TH>감사인</TH><TH>감사의견</TH></TR></THEAD><TBODY>
+        <TR><TD>제58기</TD><TD>한영회계법인</TD><TD>적정</TD></TR>
+        </TBODY></TABLE>
+        <TABLE><THEAD><TR><TH>사업연도</TH><TH>감사인</TH><TH>감사의견</TH></TR></THEAD><TBODY>
+        <TR><TD>제58기</TD><TD>삼정회계법인</TD><TD>적정</TD></TR>
+        </TBODY></TABLE>
+        """
+        self.assertEqual(reconcile.parse_auditor_from_opinion_table(document), "")
+
+    def test_hours_accept_korean_thousands_separators(self):
+        self.assertEqual(reconcile.parse_hours("39.012"), 39012)
+        self.assertEqual(reconcile.parse_hours("40,370"), 40370)
+
 
 if __name__ == "__main__":
     unittest.main()

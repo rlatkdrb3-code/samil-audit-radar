@@ -6,9 +6,11 @@ from __future__ import annotations
 import argparse
 import calendar
 import csv
+import hmac
 import json
 import os
 import re
+import subprocess
 import sys
 import threading
 import time
@@ -25,6 +27,13 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
+
+from reconcile_opendart import (
+    DartClient as SourceDocumentClient,
+    DartError as SourceDocumentError,
+    clean_text as clean_document_text,
+    table_cells as document_table_cells,
+)
 
 
 BASE_URL = "https://opendart.fss.or.kr/api"
@@ -44,6 +53,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = ROOT.parent
 MARKET_SHARE_HTML = ROOT / "web" / "market_share.html"
 MARKET_SHARE_CSV = ROOT / "examples" / "audit_market_2023_2024_annual_report_all.csv"
+MARKET_REFRESH_OUTPUT = Path("/tmp/audit_market_2023_2025_annual_report_all.csv")
 PROCESS_TO_AX_HTML = ROOT / "web" / "process_to_ax.html"
 CACHE_DIR = PROJECT_ROOT / ".cache"
 CORP_CACHE = CACHE_DIR / "corp_codes.json"
@@ -56,6 +66,14 @@ FIRM_CONTEXT_CANDIDATES = (
 REQUEST_LOGS: dict[str, list[float]] = {}
 RESPONSE_CACHE: dict[str, tuple[float, Any]] = {}
 SERVER_LOCK = threading.Lock()
+MARKET_REFRESH_LOCK = threading.Lock()
+MARKET_REFRESH_STATE: dict[str, Any] = {
+    "status": "idle",
+    "started_at": "",
+    "finished_at": "",
+    "returncode": None,
+    "log": "",
+}
 CORP_CACHE_LOCK = threading.Lock()
 KST = timezone(timedelta(hours=9))
 CORP_CLASS_LABELS = {
@@ -936,10 +954,16 @@ def build_report(
         latest_business_year=latest_completed_year,
     )
     annual_report_filings = fetch_annual_report_filings(corp["corp_code"], config, years=years)
+    document_history_bundle = fetch_recent_annual_report_document_history(
+        annual_report_filings,
+        structured_history,
+        config,
+        latest_business_year=latest_completed_year,
+    )
     disclosure_bundle = fetch_external_audit_disclosures(corp["corp_code"], config, years=years)
     audit_history = merge_audit_sources(
         structured_history,
-        disclosure_bundle["history"],
+        document_history_bundle["history"],
         years=years,
     )
     last_requested_year = latest_completed_year
@@ -984,10 +1008,12 @@ def build_report(
         disclosure_bundle["history"],
         disclosure_bundle["special_issues"],
         annual_report_filings,
+        document_history_bundle["history"],
         years=years,
         current_year=config.current_year,
         latest_business_year=latest_completed_year,
         external_error=disclosure_bundle.get("error"),
+        document_errors=document_history_bundle["errors"],
     )
     attach_coverage_status(analysis, coverage)
     sales_strategy = build_sales_strategy(
@@ -1019,6 +1045,7 @@ def build_report(
         "history": audit_history,
         "history_sources": {
             "periodic_report_api": structured_history,
+            "annual_report_documents": document_history_bundle["history"],
             "external_audit_reports": disclosure_bundle["history"],
         },
         "audit_disclosures": disclosure_bundle["filings"],
@@ -1188,6 +1215,221 @@ def annual_report_business_year(filing: dict[str, Any]) -> str:
     receipt_year = int(match.group(1))
     receipt_month = int(match.group(2))
     return str(receipt_year - 1 if receipt_month <= 6 else receipt_year)
+
+
+def select_document_fallback_filings(
+    annual_report_filings: list[dict[str, Any]],
+    structured_history: list[dict[str, Any]],
+    *,
+    latest_business_year: int,
+    recent_years: int = 3,
+) -> list[dict[str, Any]]:
+    """Select only recent annual reports missing from the structured auditor API."""
+    structured_years = {
+        int_or_zero(row.get("bsns_year"))
+        for row in structured_history
+        if int_or_zero(row.get("bsns_year"))
+    }
+    earliest_year = latest_business_year - max(1, recent_years) + 1
+    selected = [
+        filing
+        for filing in annual_report_filings
+        if earliest_year <= int_or_zero(filing.get("business_year")) <= latest_business_year
+        and int_or_zero(filing.get("business_year")) not in structured_years
+        and str(filing.get("rcept_no", "")).strip()
+    ]
+    selected.sort(
+        key=lambda filing: (
+            int_or_zero(filing.get("business_year")),
+            str(filing.get("rcept_dt", "")),
+        ),
+        reverse=True,
+    )
+    return selected[:recent_years]
+
+
+def annual_report_document_history_row(
+    filing: dict[str, Any],
+    raw_document: str,
+) -> dict[str, Any] | None:
+    """Extract an auditor only when two independent annual-report tables agree."""
+    evidence, conflict = current_auditor_document_evidence(raw_document)
+    evidence_types = {item["evidence_type"] for item in evidence}
+    auditor_keys = {item["auditor_key"] for item in evidence}
+    if (
+        conflict
+        or "audit_service_table" not in evidence_types
+        or "audit_opinion_table" not in evidence_types
+        or len(evidence) < 2
+        or len(auditor_keys) != 1
+    ):
+        return None
+    auditor = evidence[0]["auditor"]
+
+    business_year = str(filing.get("business_year", "")).strip()
+    if not business_year:
+        return None
+    return {
+        "bsns_year": business_year,
+        "adtor": auditor,
+        "auditor_verified": True,
+        "adt_opinion": "",
+        "corp_cls": str(filing.get("corp_cls", "")).strip(),
+        "corp_code": str(filing.get("corp_code", "")).strip(),
+        "corp_name": str(filing.get("corp_name", "")).strip(),
+        "report_nm": str(filing.get("report_nm", "")).strip(),
+        "rcept_no": str(filing.get("rcept_no", "")).strip(),
+        "rcept_dt": str(filing.get("rcept_dt", "")).strip(),
+        "rcept_url": str(filing.get("rcept_url", "")).strip(),
+        "period_label": business_year,
+        "source_kind": "annual_report_document",
+        "source_detail": "사업보고서 원문 document.xml",
+        "source_note": f"구조화 API 공백을 사업보고서 원문의 감사의견·감사용역 표 {len(evidence)}개가 일치한 경우에만 보완했습니다.",
+        "evidence_types": sorted(evidence_types),
+        "period_labels": sorted({item["period_label"] for item in evidence}),
+    }
+
+
+def current_auditor_document_evidence(
+    raw_document: str,
+) -> tuple[list[dict[str, str]], bool]:
+    """Read only primary audit tables and select the unique maximum reporting term."""
+    evidence: list[dict[str, str]] = []
+    conflict = False
+    for table_match in re.finditer(r"<TABLE\b.*?</TABLE>", raw_document, flags=re.I | re.S):
+        table = table_match.group(0)
+        header_match = re.search(r"<THEAD\b.*?</THEAD>", table, flags=re.I | re.S)
+        if not header_match:
+            continue
+        header = header_match.group(0)
+        header_text = clean_document_text(header)
+        if all(label in header_text for label in ("사업연도", "감사인", "감사의견")):
+            evidence_type = "audit_opinion_table"
+        elif all(
+            label in header_text
+            for label in ("사업연도", "감사인", "감사계약내역", "실제수행내역")
+        ):
+            evidence_type = "audit_service_table"
+        else:
+            continue
+
+        column_map: tuple[int, int] | None = None
+        for header_row in re.findall(r"<TR\b.*?</TR>", header, flags=re.I | re.S):
+            cells = document_table_cells(header_row)
+            period_index = next(
+                (index for index, value in enumerate(cells) if "사업연도" in value),
+                None,
+            )
+            auditor_index = next(
+                (index for index, value in enumerate(cells) if value.strip() == "감사인"),
+                None,
+            )
+            if period_index is not None and auditor_index is not None:
+                column_map = period_index, auditor_index
+                break
+        if column_map is None:
+            continue
+
+        body_match = re.search(r"<TBODY\b.*?</TBODY>", table, flags=re.I | re.S)
+        body = body_match.group(0) if body_match else table
+        candidates: list[tuple[int, str, str]] = []
+        for row_html in re.findall(r"<TR\b.*?</TR>", body, flags=re.I | re.S):
+            cells = document_table_cells(row_html)
+            period_index, auditor_index = column_map
+            if max(period_index, auditor_index) >= len(cells):
+                continue
+            period_label = cells[period_index].strip()
+            auditor = re.sub(r"\s+", " ", cells[auditor_index]).strip()
+            rank = document_period_rank(period_label)
+            if rank is None or not valid_document_auditor_cell(auditor):
+                continue
+            candidates.append((rank, period_label, auditor))
+        if not candidates:
+            continue
+
+        maximum_rank = max(item[0] for item in candidates)
+        current_candidates = [item for item in candidates if item[0] == maximum_rank]
+        names = {normalize_auditor(item[2]) for item in current_candidates}
+        if len(names) != 1:
+            conflict = True
+            continue
+        _, period_label, auditor = current_candidates[0]
+        evidence.append(
+            {
+                "evidence_type": evidence_type,
+                "period_label": period_label,
+                "auditor": auditor,
+                "auditor_key": normalize_auditor(auditor),
+            }
+        )
+    return evidence, conflict
+
+
+def document_period_rank(period_label: str) -> int | None:
+    compact = re.sub(r"\s+", "", period_label or "")
+    if "당기" in compact:
+        return 1_000_000
+    term_match = re.search(r"제(\d+)기", compact)
+    if term_match:
+        return int(term_match.group(1))
+    year_match = re.search(r"(20\d{2})", compact)
+    if year_match:
+        return int(year_match.group(1))
+    return None
+
+
+def valid_document_auditor_cell(value: str) -> bool:
+    compact = re.sub(r"\s+", " ", value or "").strip()
+    if not compact or len(compact) > 80:
+        return False
+    if any(label in compact for label in ("해당사항 없음", "해당 없음", "미선임")):
+        return False
+    return len(re.findall(r"(?:회계법인|감사반)", compact)) == 1
+
+
+def fetch_recent_annual_report_document_history(
+    annual_report_filings: list[dict[str, Any]],
+    structured_history: list[dict[str, Any]],
+    config: AppConfig,
+    *,
+    latest_business_year: int,
+    recent_years: int = 3,
+) -> dict[str, list[Any]]:
+    targets = select_document_fallback_filings(
+        annual_report_filings,
+        structured_history,
+        latest_business_year=latest_business_year,
+        recent_years=recent_years,
+    )
+    if not targets:
+        return {"history": [], "errors": []}
+
+    client = SourceDocumentClient(require_key(config), timeout=30, retries=2)
+    history: list[dict[str, Any]] = []
+    errors: list[str] = []
+
+    def fetch_one(filing: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any] | None]:
+        raw_document = client.get_document(str(filing.get("rcept_no", "")))
+        return filing, annual_report_document_history_row(filing, raw_document)
+
+    with ThreadPoolExecutor(max_workers=min(3, len(targets))) as executor:
+        futures = {executor.submit(fetch_one, filing): filing for filing in targets}
+        for future in as_completed(futures):
+            filing = futures[future]
+            business_year = str(filing.get("business_year", "")).strip() or "연도 미상"
+            try:
+                _, row = future.result()
+            except (SourceDocumentError, RuntimeError, OSError, ValueError) as exc:
+                errors.append(f"{business_year} 사업보고서 원문 조회 실패: {exc}")
+                continue
+            if row is None:
+                errors.append(f"{business_year} 사업보고서 원문에서 감사인 항목을 찾지 못했습니다.")
+                continue
+            history.append(row)
+
+    history.sort(key=lambda row: int_or_zero(row.get("bsns_year")), reverse=True)
+    errors.sort(reverse=True)
+    return {"history": history, "errors": errors}
 
 
 def dart_list_filings(
@@ -1384,11 +1626,13 @@ def build_coverage_summary(
     external_history: list[dict[str, Any]],
     special_issues: list[dict[str, Any]],
     annual_report_filings: list[dict[str, Any]],
+    document_history: list[dict[str, Any]],
     *,
     years: int,
     current_year: int,
     latest_business_year: int | None = None,
     external_error: str | None,
+    document_errors: list[str] | None = None,
 ) -> dict[str, Any]:
     history_years = {str(row.get("bsns_year", "")).strip() for row in history}
     annual_report_years = {str(row.get("business_year", "")).strip() for row in annual_report_filings if str(row.get("business_year", "")).strip()}
@@ -1399,8 +1643,12 @@ def build_coverage_summary(
     ]
     annual_report_gap_years = [year for year in requested_years if year in annual_report_years and year not in history_years]
     missing_requested_years = [year for year in requested_years if year not in history_years and year not in annual_report_years]
+    history_gap_years = [year for year in requested_years if year not in history_years]
+    recent_history_gap_years = [
+        year for year in requested_years[: min(3, len(requested_years))] if year not in history_years
+    ]
     notes = [
-        "감사인명은 정기보고서 주요정보 API에서 확인된 값만 사용합니다. 외부감사관련 공시목록의 제출인명은 감사인으로 대체하지 않습니다."
+        "감사인명은 정기보고서 주요정보 API 또는 사업보고서 원문 감사인 표에서 확인된 값만 사용합니다. 외부감사관련 공시목록의 제출인명은 감사인으로 대체하지 않습니다."
     ]
     if annual_report_gap_years:
         notes.append(
@@ -1412,14 +1660,19 @@ def build_coverage_summary(
         )
     if external_error:
         notes.append(f"외부감사관련 공시검색 보조 조회 실패: {external_error}")
+    if document_errors:
+        notes.extend(document_errors)
     return {
         "merged_rows": len(history),
         "periodic_report_api_rows": len(structured_history),
+        "annual_report_document_rows": len(document_history),
         "external_audit_report_rows": len(external_history),
         "annual_report_rows": len(annual_report_filings),
         "requested_years": requested_years,
         "annual_report_years": sorted(annual_report_years, reverse=True),
         "annual_report_gap_years": annual_report_gap_years,
+        "history_gap_years": history_gap_years,
+        "recent_history_gap_years": recent_history_gap_years,
         "special_issue_rows": len(special_issues),
         "missing_requested_years": missing_requested_years,
         "missing_recent_years": missing_requested_years,
@@ -1433,20 +1686,35 @@ def attach_coverage_status(analysis: dict[str, Any], coverage: dict[str, Any]) -
     requested_years = coverage.get("requested_years") or []
     expected_latest = str(requested_years[0]) if requested_years else ""
     observed_latest = str(analysis.get("latest_business_year") or "")
+    recent_history_gaps = coverage.get("recent_history_gap_years") or []
     if expected_latest and observed_latest != expected_latest:
         analysis["data_quality_status"] = "data_gap"
         analysis["data_quality_message"] = (
             f"최신 완료 사업연도 기준은 {expected_latest}년이지만 감사인명은 {observed_latest or '미확인'}년까지 확인됩니다. "
             "오래된 감사인을 현재 감사인으로 간주하지 않으며, 최신 사업보고서·회사 IR 원문 확인이 필요합니다."
         )
+    elif recent_history_gaps:
+        analysis["data_quality_status"] = "partial_recent_history"
+        analysis["data_quality_message"] = (
+            f"최신 완료 사업연도 {observed_latest}년 감사인은 확인됐지만 최근 이력 중 "
+            f"{', '.join(recent_history_gaps)}년이 비어 있습니다. 연속 선임연수는 실제보다 짧을 수 있어 원문 확인이 필요합니다."
+        )
     else:
         analysis["data_quality_status"] = "latest_year_observed"
+        source_label = (
+            "사업보고서 원문"
+            if analysis.get("latest_source_kind") == "annual_report_document"
+            else "구조화 공시"
+        )
         analysis["data_quality_message"] = (
-            f"{observed_latest} 사업연도 감사인명이 구조화 공시에서 확인됩니다. "
+            f"{observed_latest} 사업연도 감사인명이 {source_label}에서 확인됩니다. "
             "현재 선임기간과 후속 선임 결과는 별도 원문 확인이 필요합니다."
         )
     verification = analysis.get("timeline_verification") or {}
-    if verification and analysis.get("data_quality_status") == "data_gap":
+    if verification and analysis.get("data_quality_status") in {
+        "data_gap",
+        "partial_recent_history",
+    }:
         verification["detail"] = (
             analysis["data_quality_message"] + " " + str(verification.get("detail") or "")
         )
@@ -1787,6 +2055,7 @@ def analyze_history(corp: dict[str, str], history: list[dict[str, Any]], current
         "current_auditor": latest["adtor"],
         "current_auditor_key": latest["auditor_key"],
         "latest_source": latest.get("source_detail", "OpenDART"),
+        "latest_source_kind": latest.get("source_kind", ""),
         "latest_source_note": latest.get("source_note", ""),
         "latest_business_year": latest["bsns_year"],
         "consecutive_years": latest_run["length"],
@@ -3325,6 +3594,7 @@ def build_demo_report() -> dict[str, Any]:
         [],
         [],
         [],
+        [],
         years=len(history),
         current_year=today_kst().year,
         latest_business_year=today_kst().year - 1,
@@ -3777,6 +4047,88 @@ def digits_int(value: Any) -> int:
     return int(digits) if digits else 0
 
 
+def market_refresh_authorized(handler: BaseHTTPRequestHandler) -> bool:
+    expected = os.environ.get("MARKET_REFRESH_TOKEN", "").strip()
+    supplied = str(handler.headers.get("X-Market-Refresh-Token") or "").strip()
+    return bool(expected and supplied and hmac.compare_digest(expected, supplied))
+
+
+def start_market_refresh() -> dict[str, Any]:
+    with MARKET_REFRESH_LOCK:
+        if MARKET_REFRESH_STATE.get("status") == "running":
+            return dict(MARKET_REFRESH_STATE)
+        MARKET_REFRESH_STATE.update(
+            {
+                "status": "running",
+                "started_at": datetime.now(timezone.utc).isoformat(),
+                "finished_at": "",
+                "returncode": None,
+                "log": "",
+            }
+        )
+        MARKET_REFRESH_OUTPUT.unlink(missing_ok=True)
+
+    def worker() -> None:
+        command = [
+            sys.executable,
+            str(ROOT / "scripts" / "reconcile_opendart.py"),
+            "--input",
+            str(MARKET_SHARE_CSV),
+            "--output",
+            str(MARKET_REFRESH_OUTPUT),
+            "--years",
+            "2025",
+            "--workers",
+            "3",
+        ]
+        try:
+            result = subprocess.run(
+                command,
+                cwd=PROJECT_ROOT,
+                capture_output=True,
+                text=True,
+                timeout=60 * 55,
+                check=False,
+            )
+            combined_log = (result.stdout + "\n" + result.stderr).strip()[-12000:]
+            status = (
+                "complete"
+                if result.returncode == 0 and MARKET_REFRESH_OUTPUT.is_file()
+                else "failed"
+            )
+            with MARKET_REFRESH_LOCK:
+                MARKET_REFRESH_STATE.update(
+                    {
+                        "status": status,
+                        "finished_at": datetime.now(timezone.utc).isoformat(),
+                        "returncode": result.returncode,
+                        "log": combined_log,
+                    }
+                )
+        except Exception as exc:  # noqa: BLE001
+            with MARKET_REFRESH_LOCK:
+                MARKET_REFRESH_STATE.update(
+                    {
+                        "status": "failed",
+                        "finished_at": datetime.now(timezone.utc).isoformat(),
+                        "returncode": -1,
+                        "log": f"{type(exc).__name__}: {exc}",
+                    }
+                )
+
+    threading.Thread(target=worker, daemon=True, name="market-refresh-2025").start()
+    return dict(MARKET_REFRESH_STATE)
+
+
+def market_refresh_status() -> dict[str, Any]:
+    with MARKET_REFRESH_LOCK:
+        state = dict(MARKET_REFRESH_STATE)
+    state["output_ready"] = MARKET_REFRESH_OUTPUT.is_file()
+    if MARKET_REFRESH_OUTPUT.is_file():
+        state["output_bytes"] = MARKET_REFRESH_OUTPUT.stat().st_size
+    return state
+
+
 def run_server(host: str, port: int, config: AppConfig) -> None:
     handler = make_handler(config)
     server = ThreadingHTTPServer((host, port), handler)
@@ -3807,6 +4159,24 @@ def make_handler(config: AppConfig) -> type[BaseHTTPRequestHandler]:
                     return
                 if parsed.path == "/data/audit-market-share.csv":
                     self.respond_file(MARKET_SHARE_CSV, "text/csv; charset=utf-8")
+                    return
+                if parsed.path.startswith("/api/internal/market-refresh"):
+                    if not market_refresh_authorized(self):
+                        self.respond_json({"error": "not found"}, status=404)
+                        return
+                    if parsed.path == "/api/internal/market-refresh/start":
+                        self.respond_json(start_market_refresh(), status=202)
+                        return
+                    if parsed.path == "/api/internal/market-refresh/status":
+                        self.respond_json(market_refresh_status())
+                        return
+                    if parsed.path == "/api/internal/market-refresh/download":
+                        self.respond_file(
+                            MARKET_REFRESH_OUTPUT,
+                            "text/csv; charset=utf-8",
+                        )
+                        return
+                    self.respond_json({"error": "not found"}, status=404)
                     return
                 if parsed.path.startswith("/api/") and not allow_request(client_ip(self)):
                     self.respond_json(
@@ -4301,6 +4671,7 @@ INDEX_HTML = r"""<!doctype html>
         <div class="coverage-grid">
           <div><span>병합 이력</span><strong>${esc(c.merged_rows || 0)}건</strong></div>
           <div><span>정기보고서 API</span><strong>${esc(c.periodic_report_api_rows || 0)}건</strong></div>
+          <div><span>사업보고서 원문 보완</span><strong>${esc(c.annual_report_document_rows || 0)}건</strong></div>
           <div><span>사업보고서 목록</span><strong>${esc(c.annual_report_rows || 0)}건</strong></div>
           <div><span>외부감사 공시</span><strong>${esc(c.external_audit_report_rows || 0)}건</strong></div>
           <div><span>특이공시</span><strong>${esc(c.special_issue_rows || 0)}건</strong></div>

@@ -94,6 +94,7 @@ class AuditRadarAccuracyTests(unittest.TestCase):
             [],
             [],
             [{"business_year": "2025"}],
+            [],
             years=10,
             current_year=2026,
             external_error=None,
@@ -155,6 +156,104 @@ class AuditRadarAccuracyTests(unittest.TestCase):
         self.assertEqual(analysis["data_quality_status"], "data_gap")
         self.assertIn("2025년", analysis["data_quality_message"])
         self.assertIn("오래된 감사인", analysis["timeline_verification"]["detail"])
+
+    def test_document_fallback_selects_only_recent_missing_years(self):
+        filings = [
+            {"business_year": "2025", "rcept_no": "20260301"},
+            {"business_year": "2024", "rcept_no": "20250301"},
+            {"business_year": "2023", "rcept_no": "20240301"},
+            {"business_year": "2018", "rcept_no": "20190301"},
+        ]
+        selected = radar.select_document_fallback_filings(
+            filings,
+            [{"bsns_year": "2024", "adtor": "A회계법인"}],
+            latest_business_year=2025,
+        )
+        self.assertEqual(
+            [row["business_year"] for row in selected],
+            ["2025", "2023"],
+        )
+
+    def test_document_fallback_requires_two_tables_to_agree(self):
+        filing = {
+            "business_year": "2025",
+            "corp_code": "001",
+            "corp_name": "테스트",
+            "corp_cls": "Y",
+            "report_nm": "사업보고서 (2025.12)",
+            "rcept_no": "20260301000001",
+            "rcept_dt": "20260301",
+            "rcept_url": "https://example.test",
+        }
+        matching_document = """
+        <TABLE><THEAD><TR><TH>사업연도</TH><TH>감사인</TH><TH>감사계약내역</TH><TH>보수</TH><TH>시간</TH><TH>실제수행내역</TH></TR></THEAD>
+        <TBODY><TR><TD>제58기 (당기)</TD><TD>삼정회계법인</TD><TD>감사</TD><TD>100백만원</TD><TD>1,000</TD><TD>100백만원</TD><TD>1,000</TD></TR></TBODY></TABLE>
+        <TABLE><THEAD><TR><TH>사업연도</TH><TH>감사인</TH><TH>감사의견</TH></TR></THEAD>
+        <TBODY><TR><TD>제58기 (당기)</TD><TD>삼정회계법인</TD><TD>적정</TD></TR></TBODY></TABLE>
+        """
+        row = radar.annual_report_document_history_row(filing, matching_document)
+        self.assertIsNotNone(row)
+        self.assertEqual(row["adtor"], "삼정회계법인")
+        self.assertEqual(row["source_kind"], "annual_report_document")
+        self.assertTrue(row["auditor_verified"])
+
+        mismatching_document = matching_document.replace(
+            "<TD>삼정회계법인</TD><TD>적정</TD>",
+            "<TD>한영회계법인</TD><TD>적정</TD>",
+        )
+        self.assertIsNone(
+            radar.annual_report_document_history_row(filing, mismatching_document)
+        )
+
+    def test_structured_api_wins_over_document_fallback_for_same_year(self):
+        merged = radar.merge_audit_sources(
+            [
+                {
+                    "bsns_year": "2025",
+                    "adtor": "삼일회계법인",
+                    "source_kind": "periodic_report_api",
+                }
+            ],
+            [
+                {
+                    "bsns_year": "2025",
+                    "adtor": "삼정회계법인",
+                    "auditor_verified": True,
+                    "source_kind": "annual_report_document",
+                }
+            ],
+            years=10,
+        )
+        self.assertEqual(merged[0]["adtor"], "삼일회계법인")
+
+    def test_latest_document_source_is_labelled_as_original_report(self):
+        analysis = {
+            "status": "ok",
+            "latest_business_year": "2025",
+            "latest_source_kind": "annual_report_document",
+        }
+        radar.attach_coverage_status(analysis, {"requested_years": ["2025"]})
+        self.assertIn("사업보고서 원문", analysis["data_quality_message"])
+
+    def test_recent_middle_year_gap_is_not_shown_as_complete(self):
+        analysis = {
+            "status": "ok",
+            "latest_business_year": "2026",
+            "latest_source_kind": "periodic_report_api",
+            "timeline_verification": {"detail": "기존 설명"},
+        }
+        radar.attach_coverage_status(
+            analysis,
+            {
+                "requested_years": ["2026", "2025", "2024"],
+                "recent_history_gap_years": ["2025"],
+            },
+        )
+        self.assertEqual(
+            analysis["data_quality_status"],
+            "partial_recent_history",
+        )
+        self.assertIn("연속 선임연수", analysis["data_quality_message"])
 
 
 if __name__ == "__main__":
