@@ -830,7 +830,11 @@ def clear_audit_fields(row: dict[str, str]) -> None:
     ):
         row[field] = ""
     row["auditor_group"] = "other_or_unknown"
-    row["warnings"] = ""
+    row["warnings"] = ";".join(
+        warning
+        for warning in re.split(r"[;,]", row.get("warnings", ""))
+        if "fnlttSinglAcntAll" in warning
+    )
     row["validation_status"] = "pending"
 
 

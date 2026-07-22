@@ -55,7 +55,10 @@ class ReconcileUniverseTests(unittest.TestCase):
             "audit_actual_hours": "1100",
             "auditor_source": "document.xml",
             "fee_source": "document.xml",
-            "warnings": "document_fields_unresolved",
+            "warnings": (
+                "document_fields_unresolved;"
+                "fnlttSinglAcntAll request failed: TimeoutError"
+            ),
             "validation_status": "unresolved",
             "revenue": "999000000",
             "revenue_source": "fnlttSinglAcntAll",
@@ -75,7 +78,10 @@ class ReconcileUniverseTests(unittest.TestCase):
             self.assertEqual(row[field], "")
         self.assertEqual(row["revenue"], "999000000")
         self.assertEqual(row["revenue_source"], "fnlttSinglAcntAll")
-        self.assertEqual(row["warnings"], "")
+        self.assertEqual(
+            row["warnings"],
+            "fnlttSinglAcntAll request failed: TimeoutError",
+        )
         self.assertEqual(row["validation_status"], "pending")
 
     def test_primary_tables_choose_unique_maximum_term(self):
