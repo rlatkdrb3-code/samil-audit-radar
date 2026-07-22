@@ -16,6 +16,7 @@ import datetime as dt
 import html
 import io
 import json
+import math
 import os
 import re
 import sys
@@ -312,8 +313,23 @@ def context_unit(raw: str) -> str:
 def clean_numeric_cell(cell: str) -> str:
     text = re.sub(r"\(\s*\*\s*\d+\s*\)", " ", str(cell or ""))
     text = re.sub(r"\(\s*주\s*\d+\s*\)|주\s*\d+\s*\)?", " ", text)
-    text = re.sub(r"(?<=\d)\s+(?=[\d,.])", "", text)
+    # Repair a narrow OCR/layout split such as ``2 0,000천원`` without
+    # joining legitimate multi-part values such as quarterly hour totals.
+    text = re.sub(
+        r"(?<!\d)(\d{1,2})\s+(\d{1,2},\d{3})(?![\d,])",
+        r"\1\2",
+        text,
+    )
     return re.sub(r"\s+", " ", text).strip()
+
+
+def localized_token_value(token: str) -> float | None:
+    if re.fullmatch(r"\d{1,3}(?:\.\d{3})+", token):
+        return float(token.replace(".", ""))
+    try:
+        return float(token.replace(",", ""))
+    except ValueError:
+        return None
 
 
 def parse_localized_number(value: str) -> tuple[float, re.Match[str]] | None:
@@ -321,12 +337,8 @@ def parse_localized_number(value: str) -> tuple[float, re.Match[str]] | None:
     if not match:
         return None
     token = match.group(1)
-    if re.fullmatch(r"\d{1,3}(?:\.\d{3})+", token):
-        return float(token.replace(".", "")), match
-    try:
-        return float(token.replace(",", "")), match
-    except ValueError:
-        return None
+    number = localized_token_value(token)
+    return (number, match) if number is not None else None
 
 
 def parse_money(cell: str, unit: str) -> tuple[float | None, str | None]:
@@ -370,11 +382,14 @@ def parse_hours(cell: str) -> int | None:
         cleaned = explicit_hours.group(1)
     elif re.search(r"\d\s*(?:일|days?)\b", cleaned, flags=re.I):
         return None
-    parsed = parse_localized_number(cleaned)
-    if not parsed:
+    matches = list(
+        re.finditer(r"(?<![\d.,])(\d[\d,.]*\d|\d)(?![\d.,])", cleaned)
+    )
+    values = [localized_token_value(match.group(1)) for match in matches]
+    numbers = [value for value in values if value is not None]
+    if not numbers:
         return None
-    number, _ = parsed
-    return round(number)
+    return round(sum(numbers))
 
 
 def table_cells(row_html: str) -> list[str]:
@@ -628,19 +643,40 @@ def requires_currency_verification(row: dict[str, str]) -> bool:
     )
 
 
-def document_needs_reconciliation(row: dict[str, str], receipt_changed: bool) -> bool:
+def audit_metric_anomaly(row: dict[str, str]) -> bool:
+    """Flag mechanically suspicious audit metrics for source reconciliation."""
     contract = parse_number(row.get("audit_contract_fee"))
     actual = parse_number(row.get("audit_actual_fee"))
+    contract_hours = parse_number(row.get("audit_contract_hours"))
+    actual_hours = parse_number(row.get("audit_actual_hours"))
+
+    values = (contract, actual, contract_hours, actual_hours)
+    if any(value is not None and (not math.isfinite(value) or value < 0) for value in values):
+        return True
+    if contract is None or actual is None or actual == 0:
+        return True
+    ratio = contract / actual
+    if ratio < 0.1 or ratio > 10:
+        return True
+
+    for fee, hours in ((contract, contract_hours), (actual, actual_hours)):
+        if hours is not None and hours > 500_000:
+            return True
+        if fee is not None and fee > 0 and hours is not None and hours > 0:
+            hourly_rate = fee / hours
+            if hourly_rate < 20_000 or hourly_rate > 2_000_000:
+                return True
+    return False
+
+
+def document_needs_reconciliation(row: dict[str, str], receipt_changed: bool) -> bool:
     if (
         receipt_changed
         or not row.get("auditor_raw", "").strip()
         or requires_currency_verification(row)
     ):
         return True
-    if contract is None or actual is None or contract < 0 or actual < 0 or actual == 0:
-        return True
-    ratio = contract / actual
-    return ratio < 0.1 or ratio > 10
+    return audit_metric_anomaly(row)
 
 
 def reconcile_document(
@@ -958,6 +994,16 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Discard bundled auditor/fee values for selected years and fetch them again.",
     )
+    parser.add_argument(
+        "--force-document-refresh",
+        action="store_true",
+        help="Reconcile every selected row against its source filing document.",
+    )
+    parser.add_argument(
+        "--repair-anomalies",
+        action="store_true",
+        help="Discard and refetch only mechanically suspicious audit metrics.",
+    )
     return parser.parse_args()
 
 
@@ -979,8 +1025,20 @@ def main() -> int:
         rows, changed_receipts = merge_universe(rows, filings_by_year)
 
     selected_rows = [row for row in rows if int(row.get("year") or 0) in args.years]
+    repair_rows = (
+        [
+            row
+            for row in selected_rows
+            if audit_metric_anomaly(row) or requires_currency_verification(row)
+        ]
+        if args.repair_anomalies
+        else []
+    )
     if args.force_audit_refresh:
         for row in selected_rows:
+            clear_audit_fields(row)
+    elif repair_rows:
+        for row in repair_rows:
             clear_audit_fields(row)
 
     for row in selected_rows:
@@ -995,18 +1053,18 @@ def main() -> int:
             "fnlttSinglAcntAll" if row.get("revenue") else ""
         )
 
-    audit_api_targets = (
-        selected_rows
-        if args.force_audit_refresh
-        else [
-            row
-            for row in selected_rows
-            if not row.get("auditor_raw", "").strip()
-            or parse_number(row.get("audit_contract_fee")) is None
-            or (row.get("year", ""), row.get("corp_code", ""))
-            in changed_receipts
-        ]
-    )
+    forced_keys = {
+        (row.get("year", ""), row.get("corp_code", ""))
+        for row in (selected_rows if args.force_audit_refresh else repair_rows)
+    }
+    audit_api_targets = [
+        row
+        for row in selected_rows
+        if (row.get("year", ""), row.get("corp_code", "")) in forced_keys
+        or not row.get("auditor_raw", "").strip()
+        or parse_number(row.get("audit_contract_fee")) is None
+        or (row.get("year", ""), row.get("corp_code", "")) in changed_receipts
+    ]
     print(f"structured audit-service targets: {len(audit_api_targets):,}")
     audit_api_results = run_parallel(
         lambda row: fetch_audit_service_api(client, row),
@@ -1040,11 +1098,19 @@ def main() -> int:
         for warning in result.get("warnings", []):
             append_warning(row, warning)
 
-    document_targets = [
-        row
-        for row in selected_rows
-        if document_needs_reconciliation(row, False)
-    ]
+    document_targets = (
+        selected_rows
+        if args.force_document_refresh
+        else [
+            row
+            for row in selected_rows
+            if document_needs_reconciliation(
+                row,
+                (row.get("year", ""), row.get("corp_code", ""))
+                in changed_receipts,
+            )
+        ]
+    )
     print(f"source filing reconciliation targets: {len(document_targets):,}")
     document_results = run_parallel(
         lambda row: reconcile_document(client, row),

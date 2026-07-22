@@ -4115,6 +4115,7 @@ def start_market_refresh() -> dict[str, Any]:
             "--workers",
             "6",
             "--force-audit-refresh",
+            "--force-document-refresh",
             "--skip-revenue",
         ]
         try:

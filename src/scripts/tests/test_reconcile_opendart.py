@@ -119,6 +119,8 @@ class ReconcileUniverseTests(unittest.TestCase):
         self.assertEqual(reconcile.parse_hours("1,200.00"), 1200)
         self.assertIsNone(reconcile.parse_hours("(*1)"))
         self.assertIsNone(reconcile.parse_hours("7일"))
+        self.assertEqual(reconcile.parse_hours("719 798 1,633 1,916"), 5_066)
+        self.assertEqual(reconcile.parse_hours("1,425 / 796"), 2_221)
 
     def test_money_honors_table_unit_and_korean_thousands_separators(self):
         self.assertEqual(reconcile.parse_money("65.000", "천원"), (65_000_000, None))
@@ -157,6 +159,38 @@ class ReconcileUniverseTests(unittest.TestCase):
         self.assertFalse(
             reconcile.requires_currency_verification(
                 {"stock_code": "005930", "corp_name": "삼성전자"}
+            )
+        )
+
+    def test_audit_metric_anomaly_flags_bad_units_and_corrupted_hours(self):
+        self.assertTrue(
+            reconcile.audit_metric_anomaly(
+                {
+                    "audit_contract_fee": "1000000",
+                    "audit_actual_fee": "1000000",
+                    "audit_contract_hours": "9000",
+                    "audit_actual_hours": "8000",
+                }
+            )
+        )
+        self.assertTrue(
+            reconcile.audit_metric_anomaly(
+                {
+                    "audit_contract_fee": "470000000",
+                    "audit_actual_fee": "470000000",
+                    "audit_contract_hours": "4700",
+                    "audit_actual_hours": "719798",
+                }
+            )
+        )
+        self.assertFalse(
+            reconcile.audit_metric_anomaly(
+                {
+                    "audit_contract_fee": "470000000",
+                    "audit_actual_fee": "470000000",
+                    "audit_contract_hours": "4700",
+                    "audit_actual_hours": "4980",
+                }
             )
         )
 
