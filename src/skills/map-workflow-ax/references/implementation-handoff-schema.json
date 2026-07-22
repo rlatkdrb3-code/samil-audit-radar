@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/process-to-ax/implementation-handoff-schema.json",
+  "title": "Process-to-AX implementation handoff",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "created_at",
+    "source",
+    "selection",
+    "target",
+    "task",
+    "context",
+    "result_contract",
+    "packet_sha256",
+    "handoff_id"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "created_at": {"type": "string", "minLength": 1},
+    "handoff_id": {"type": "string", "minLength": 1},
+    "packet_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "source": {
+      "type": "object",
+      "required": [
+        "session_id",
+        "process_revision",
+        "workspace",
+        "process_file",
+        "analysis_file",
+        "process_sha256",
+        "analysis_sha256",
+        "process_status",
+        "analysis_status"
+      ]
+    },
+    "selection": {
+      "type": "object",
+      "required": ["opportunity_id", "confirmed_by_user", "confirmation_evidence"],
+      "properties": {
+        "opportunity_id": {"type": "string", "pattern": "^AX[0-9]{2,}$"},
+        "confirmed_by_user": {"const": true},
+        "confirmation_evidence": {"type": "string", "minLength": 1}
+      }
+    },
+    "target": {
+      "type": "object",
+      "required": ["project_root", "implementation_output"]
+    },
+    "task": {
+      "type": "object",
+      "required": [
+        "objective",
+        "acceptance_criteria",
+        "constraints",
+        "test_commands",
+        "open_item_policy"
+      ],
+      "properties": {
+        "objective": {"type": "string", "minLength": 1},
+        "acceptance_criteria": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "constraints": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "test_commands": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "open_item_policy": {"const": "ask-before-assuming"}
+      }
+    },
+    "context": {
+      "type": "object",
+      "required": [
+        "process_title",
+        "scope",
+        "confirmed_steps",
+        "touching_branches",
+        "protected_actions",
+        "opportunity",
+        "mvp",
+        "unresolved_questions"
+      ]
+    },
+    "result_contract": {
+      "type": "object",
+      "required": ["file", "allowed_statuses", "baseline_is_read_only"],
+      "properties": {
+        "file": {"const": "RESULT.md"},
+        "allowed_statuses": {
+          "type": "array",
+          "items": {"enum": ["ready_for_review", "needs_input", "needs_rebase", "failed"]}
+        },
+        "baseline_is_read_only": {"const": true}
+      }
+    }
+  },
+  "additionalProperties": false
+}

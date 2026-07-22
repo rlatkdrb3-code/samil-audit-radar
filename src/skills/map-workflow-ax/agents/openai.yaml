@@ -1,0 +1,4 @@
+interface:
+  display_name: "Process-to-AX Mapper"
+  short_description: "대화로 업무를 확정하고 AX 기회와 별도 구현 인계를 설계합니다"
+  default_prompt: "Use $map-workflow-ax to confirm my workflow, design grounded AX opportunities, and prepare a separate Codex implementation task when I select one."

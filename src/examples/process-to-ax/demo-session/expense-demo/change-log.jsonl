@@ -1,0 +1,18 @@
+{"timestamp": "2026-07-10T13:47:00+00:00", "session_id": "expense-demo", "revision": 1, "event": "session_initialized", "details": {"title": "임직원 경비 정산"}}
+{"timestamp": "2026-07-10T13:47:00+00:00", "session_id": "expense-demo", "revision": 2, "event": "scope_updated", "details": {"purpose": "정당한 업무경비를 승인·회계처리·지급하고 증빙을 보존한다.", "start_trigger": "임직원이 출장 또는 업무 관련 비용을 지출한다.", "end_condition": "ERP 전표와 필요한 지급이 승인되고 증빙이 보관된다.", "included": ["국내 출장·업무경비"], "excluded": ["해외출장"], "customers": ["신청 임직원", "재무운영팀"], "source_quotes": ["출장비 정산 업무를 정리해보고 싶어요."]}}
+{"timestamp": "2026-07-10T13:47:00+00:00", "session_id": "expense-demo", "revision": 3, "event": "step_added", "details": {"step_id": "S01"}}
+{"timestamp": "2026-07-10T13:47:00+00:00", "session_id": "expense-demo", "revision": 4, "event": "step_confirmed", "details": {"step_id": "S01"}}
+{"timestamp": "2026-07-10T13:47:00+00:00", "session_id": "expense-demo", "revision": 5, "event": "step_added", "details": {"step_id": "S02"}}
+{"timestamp": "2026-07-10T13:47:00+00:00", "session_id": "expense-demo", "revision": 6, "event": "step_confirmed", "details": {"step_id": "S02"}}
+{"timestamp": "2026-07-10T13:47:00+00:00", "session_id": "expense-demo", "revision": 7, "event": "step_added", "details": {"step_id": "S03"}}
+{"timestamp": "2026-07-10T13:47:00+00:00", "session_id": "expense-demo", "revision": 8, "event": "step_confirmed", "details": {"step_id": "S03"}}
+{"timestamp": "2026-07-10T13:47:00+00:00", "session_id": "expense-demo", "revision": 9, "event": "step_added", "details": {"step_id": "S04"}}
+{"timestamp": "2026-07-10T13:47:01+00:00", "session_id": "expense-demo", "revision": 10, "event": "step_confirmed", "details": {"step_id": "S04"}}
+{"timestamp": "2026-07-10T13:47:01+00:00", "session_id": "expense-demo", "revision": 11, "event": "branch_added", "details": {"branch_id": "B01"}}
+{"timestamp": "2026-07-10T13:47:01+00:00", "session_id": "expense-demo", "revision": 12, "event": "branch_added", "details": {"branch_id": "B02"}}
+{"timestamp": "2026-07-10T13:47:01+00:00", "session_id": "expense-demo", "revision": 13, "event": "open_question_added", "details": {"text": "월평균 신청 건수와 단계별 소요시간은 얼마인가?", "step_id": null}}
+{"timestamp": "2026-07-10T13:47:01+00:00", "session_id": "expense-demo", "revision": 14, "event": "open_question_added", "details": {"text": "그룹웨어·카드 포털·ERP가 제공하는 API는 무엇인가?", "step_id": null}}
+{"timestamp": "2026-07-10T13:47:01+00:00", "session_id": "expense-demo", "revision": 15, "event": "interview_completed", "details": {"step_count": 4}}
+{"timestamp": "2026-07-10T13:47:44+00:00", "session_id": "expense-demo", "revision": 15, "event": "session_finalized", "details": {"report": "final-report.md", "warnings": []}}
+{"timestamp": "2026-07-10T13:52:20+00:00", "session_id": "expense-demo", "revision": 15, "event": "session_finalized", "details": {"report": "final-report.md", "warnings": []}}
+{"timestamp": "2026-07-10T13:53:01+00:00", "session_id": "expense-demo", "revision": 15, "event": "session_finalized", "details": {"report": "final-report.md", "warnings": []}}

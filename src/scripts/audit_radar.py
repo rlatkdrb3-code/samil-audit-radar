@@ -43,6 +43,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = ROOT.parent
 MARKET_SHARE_HTML = ROOT / "web" / "market_share.html"
 MARKET_SHARE_CSV = ROOT / "examples" / "audit_market_2023_2024_annual_report_all.csv"
+PROCESS_TO_AX_HTML = ROOT / "web" / "process_to_ax.html"
 CACHE_DIR = PROJECT_ROOT / ".cache"
 CORP_CACHE = CACHE_DIR / "corp_codes.json"
 ENV_FILES = (PROJECT_ROOT / ".env.local", PROJECT_ROOT / ".env")
@@ -3737,6 +3738,9 @@ def make_handler(config: AppConfig) -> type[BaseHTTPRequestHandler]:
                 if parsed.path in {"/market-share", "/market-share/"}:
                     self.respond_file(MARKET_SHARE_HTML, "text/html; charset=utf-8")
                     return
+                if parsed.path in {"/process-to-ax", "/process-to-ax/"}:
+                    self.respond_file(PROCESS_TO_AX_HTML, "text/html; charset=utf-8")
+                    return
                 if parsed.path == "/data/audit-market-share.csv":
                     self.respond_file(MARKET_SHARE_CSV, "text/csv; charset=utf-8")
                     return
@@ -4038,6 +4042,7 @@ INDEX_HTML = r"""<!doctype html>
     <nav class="site-nav" aria-label="서비스 메뉴">
       <a class="active" href="/">감사인 교체 레이더</a>
       <a href="/market-share">감사시장 점유율</a>
+      <a href="/process-to-ax">Process-to-AX</a>
     </nav>
   </header>
   <main>

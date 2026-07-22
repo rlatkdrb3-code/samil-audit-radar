@@ -1,0 +1,244 @@
+{
+  "schema_version": "1.0",
+  "session_id": "expense-demo",
+  "title": "임직원 경비 정산",
+  "status": "finalized",
+  "stage": "complete",
+  "revision": 15,
+  "created_at": "2026-07-10T13:47:00+00:00",
+  "updated_at": "2026-07-10T13:53:01+00:00",
+  "interview_confirmed": true,
+  "confirmed_at": "2026-07-10T13:47:01+00:00",
+  "scope": {
+    "purpose": "정당한 업무경비를 승인·회계처리·지급하고 증빙을 보존한다.",
+    "start_trigger": "임직원이 출장 또는 업무 관련 비용을 지출한다.",
+    "end_condition": "ERP 전표와 필요한 지급이 승인되고 증빙이 보관된다.",
+    "included": [
+      "국내 출장·업무경비"
+    ],
+    "excluded": [
+      "해외출장"
+    ],
+    "customers": [
+      "신청 임직원",
+      "재무운영팀"
+    ],
+    "source_quotes": [
+      "출장비 정산 업무를 정리해보고 싶어요."
+    ]
+  },
+  "actors": [
+    "신청자",
+    "부서 승인자",
+    "재무운영 담당자",
+    "재무운영·자금 담당자"
+  ],
+  "systems": [
+    "그룹웨어",
+    "법인카드 포털",
+    "Excel",
+    "ERP",
+    "인터넷뱅킹"
+  ],
+  "steps": [
+    {
+      "id": "S01",
+      "name": "경비 신청",
+      "actor": "신청자",
+      "action": "영수증별 사용내역과 업무 목적을 그룹웨어에 입력하고 증빙을 첨부한다.",
+      "inputs": [
+        "영수증",
+        "법인카드 사용내역"
+      ],
+      "outputs": [
+        "경비 신청서"
+      ],
+      "systems": [
+        "그룹웨어",
+        "법인카드 포털"
+      ],
+      "decision_rules": [],
+      "approvals": [],
+      "exceptions": [],
+      "frequency_per_month": null,
+      "minutes_per_case": null,
+      "manual_ratio_pct": null,
+      "pain_points": [
+        "같은 내용을 여러 번 입력한다."
+      ],
+      "data_sensitivity": null,
+      "financial_or_legal_impact": null,
+      "final_action_authority": null,
+      "status": "confirmed",
+      "confidence": "unknown",
+      "source_quotes": [
+        "영수증을 모아서 그룹웨어에 하나씩 입력하고 팀장 결재를 올립니다."
+      ],
+      "next_steps": [
+        "S02"
+      ]
+    },
+    {
+      "id": "S02",
+      "name": "부서 승인",
+      "actor": "부서 승인자",
+      "action": "업무 관련성과 지출 필요성을 검토해 승인하거나 반려한다.",
+      "inputs": [
+        "경비 신청서"
+      ],
+      "outputs": [
+        "승인 또는 반려 결과"
+      ],
+      "systems": [
+        "그룹웨어"
+      ],
+      "decision_rules": [],
+      "approvals": [
+        "부서 승인자가 업무 관련성을 최종 판단한다."
+      ],
+      "exceptions": [],
+      "frequency_per_month": null,
+      "minutes_per_case": null,
+      "manual_ratio_pct": null,
+      "pain_points": [],
+      "data_sensitivity": null,
+      "financial_or_legal_impact": null,
+      "final_action_authority": null,
+      "status": "confirmed",
+      "confidence": "unknown",
+      "source_quotes": [
+        "팀장 결재가 끝나면 재무팀에서 엑셀로 내려받아요."
+      ],
+      "next_steps": [
+        "S03"
+      ]
+    },
+    {
+      "id": "S03",
+      "name": "재무 검토",
+      "actor": "재무운영 담당자",
+      "action": "승인된 신청서와 영수증을 대조하고 경비 규정 준수 여부를 확인한다.",
+      "inputs": [
+        "승인된 경비 신청서",
+        "영수증",
+        "경비 규정"
+      ],
+      "outputs": [
+        "검토 완료 신청서"
+      ],
+      "systems": [
+        "Excel",
+        "그룹웨어"
+      ],
+      "decision_rules": [
+        "증빙 누락이나 규정 위반 가능성이 있으면 보완을 요청한다."
+      ],
+      "approvals": [],
+      "exceptions": [
+        "영수증이 없거나 흐리면 신청자에게 재요청한다."
+      ],
+      "frequency_per_month": null,
+      "minutes_per_case": null,
+      "manual_ratio_pct": null,
+      "pain_points": [
+        "증빙 확인과 규정 문의가 반복된다."
+      ],
+      "data_sensitivity": null,
+      "financial_or_legal_impact": null,
+      "final_action_authority": null,
+      "status": "confirmed",
+      "confidence": "unknown",
+      "source_quotes": [
+        "재무팀에서 엑셀로 내려받아 영수증이랑 금액을 맞춰보고 규정에 맞는지도 확인합니다."
+      ],
+      "next_steps": [
+        "S04"
+      ]
+    },
+    {
+      "id": "S04",
+      "name": "전표 및 지급 승인",
+      "actor": "재무운영·자금 담당자",
+      "action": "ERP 업로드 파일과 지급 파일을 만들고 권한 있는 승인자가 전표와 이체를 승인한다.",
+      "inputs": [
+        "검토 완료 신청서"
+      ],
+      "outputs": [
+        "승인된 ERP 전표",
+        "지급 결과"
+      ],
+      "systems": [
+        "ERP",
+        "인터넷뱅킹"
+      ],
+      "decision_rules": [],
+      "approvals": [
+        "전표와 지급은 권한 있는 사람이 승인한다."
+      ],
+      "exceptions": [],
+      "frequency_per_month": null,
+      "minutes_per_case": null,
+      "manual_ratio_pct": null,
+      "pain_points": [],
+      "data_sensitivity": null,
+      "financial_or_legal_impact": "high",
+      "final_action_authority": true,
+      "status": "confirmed",
+      "confidence": "unknown",
+      "source_quotes": [
+        "재무팀이 ERP 업로드용 엑셀을 만들고 전표를 올리며 지급 승인은 자동화하면 안 될 것 같습니다."
+      ],
+      "next_steps": [
+        "END"
+      ]
+    }
+  ],
+  "branches": [
+    {
+      "id": "B01",
+      "from_step": "S02",
+      "to_step": "S01",
+      "condition": "부서 승인자가 업무 관련성 또는 설명이 부족하다고 판단한다.",
+      "actor": "신청자",
+      "action": "반려 사유를 확인하고 신청서를 보완한다.",
+      "kind": "rejection",
+      "source_quotes": [
+        "문제가 있으면 그룹웨어로 반려합니다."
+      ]
+    },
+    {
+      "id": "B02",
+      "from_step": "S03",
+      "to_step": "S01",
+      "condition": "증빙이 누락되었거나 식별하기 어렵다.",
+      "actor": "신청자",
+      "action": "증빙을 다시 제출한다.",
+      "kind": "exception",
+      "source_quotes": [
+        "메신저로 영수증을 다시 달라고 합니다."
+      ]
+    }
+  ],
+  "open_questions": [
+    {
+      "id": "Q01",
+      "text": "월평균 신청 건수와 단계별 소요시간은 얼마인가?",
+      "step_id": null,
+      "status": "open"
+    },
+    {
+      "id": "Q02",
+      "text": "그룹웨어·카드 포털·ERP가 제공하는 API는 무엇인가?",
+      "step_id": null,
+      "status": "open"
+    }
+  ],
+  "focus": {
+    "kind": "branch",
+    "id": "B02"
+  },
+  "analysis": {
+    "status": "validated",
+    "process_revision": 15
+  }
+}

@@ -1,0 +1,257 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/process-to-ax/ax-analysis-schema.json",
+  "title": "Process-to-AX analysis",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "session_id",
+    "process_revision",
+    "summary",
+    "opportunities",
+    "mvp",
+    "unresolved_questions"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "session_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "process_revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "opportunities": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/opportunity"
+      }
+    },
+    "mvp": {
+      "$ref": "#/$defs/mvp"
+    },
+    "unresolved_questions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "evidence": {
+      "type": "object",
+      "required": ["step_id", "quote"],
+      "properties": {
+        "step_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "quote": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "opportunity": {
+      "type": "object",
+      "required": [
+        "id",
+        "title",
+        "step_ids",
+        "evidence",
+        "problem",
+        "solution_type",
+        "rationale",
+        "automation_boundary",
+        "product_features",
+        "integrations",
+        "controls",
+        "risks",
+        "assumptions",
+        "unknowns",
+        "value_hypothesis",
+        "validation_metrics",
+        "confidence",
+        "priority"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^AX[0-9]{2,}$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "step_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/evidence"
+          }
+        },
+        "problem": {
+          "type": "string",
+          "minLength": 1
+        },
+        "solution_type": {
+          "enum": [
+            "human-only",
+            "ai-assist",
+            "rules-api",
+            "rpa",
+            "dedicated-app",
+            "hybrid"
+          ]
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1
+        },
+        "automation_boundary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "product_features": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "integrations": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "controls": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "risks": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "assumptions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "unknowns": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "value_hypothesis": {
+          "type": "string",
+          "minLength": 1
+        },
+        "validation_metrics": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "confidence": {
+          "enum": ["low", "medium", "high"]
+        },
+        "priority": {
+          "enum": ["now", "next", "later", "do-not-automate"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "mvp": {
+      "type": "object",
+      "required": [
+        "selected_opportunity_ids",
+        "scope_in",
+        "scope_out",
+        "user_stories",
+        "success_metrics",
+        "human_approval_points"
+      ],
+      "properties": {
+        "selected_opportunity_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "scope_in": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "scope_out": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "user_stories": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "success_metrics": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "human_approval_points": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

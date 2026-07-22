@@ -1,25 +1,27 @@
 {
   "name": "audit-appointment-radar",
-  "version": "0.2.0",
-  "description": "Monitor auditor appointments and analyze Korean external-audit market share using reproducible OpenDART data.",
+  "version": "0.3.0",
+  "description": "Monitor auditor appointments, analyze audit-market share, and turn guided workflow interviews into evidence-linked AX opportunities.",
   "author": {
     "name": "AX Hackathon Participant"
   },
   "skills": "./skills/",
   "interface": {
-    "displayName": "Audit Market Intelligence",
-    "shortDescription": "감사인 교체 시기와 감사시장 점유율을 한곳에서 분석합니다.",
-    "longDescription": "An integrated Codex plugin for external-auditor appointment monitoring and audit-market analysis. It combines listed-company auditor history, estimated replacement timing, fees and appointment notices with reproducible OpenDART market-share dashboards by audited-company count and disclosed fee metrics.",
+    "displayName": "Audit & AX Intelligence",
+    "shortDescription": "감사시장 분석과 대화형 AX 업무설계를 한곳에서 수행합니다.",
+    "longDescription": "An integrated Codex plugin for external-auditor appointment monitoring, reproducible audit-market analysis, and stateful Process-to-AX discovery. It combines OpenDART audit intelligence with a user-confirmed workflow interview, evidence-linked AX opportunity mapping, human-control boundaries, and isolated implementation handoffs.",
     "developerName": "AX Hackathon Participant",
     "category": "Productivity",
-    "capabilities": ["Read", "Write"],
+    "capabilities": ["Interactive", "Analysis", "Read", "Write"],
     "defaultPrompt": [
       "상장사명으로 현재 감사인과 감사인 이력을 조회해줘.",
       "OpenDART 기반 감사인 교체 예상시기와 남은 기간을 정리해줘.",
       "임원 현황과 감사용역 보수·시간당 보수를 보여줘.",
       "현재 외부감사인 입찰 또는 선임 공고가 있는지 확인해줘.",
       "2023~2024 회계법인별 감사시장 점유율과 변화를 분석해줘.",
-      "감사시장 점유율 대시보드를 열어줘."
+      "감사시장 점유율 대시보드를 열어줘.",
+      "내 업무를 처음부터 한 단계씩 인터뷰해서 AX 기회 지도를 만들어줘.",
+      "확정된 AX 기회의 구현 인계서를 만들고 별도 작업으로 열어줘."
     ]
   }
 }
