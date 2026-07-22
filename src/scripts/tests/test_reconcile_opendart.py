@@ -1,4 +1,5 @@
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -38,6 +39,8 @@ class ReconcileUniverseTests(unittest.TestCase):
         rows = [
             {"auditor_group": "samil_pwc", "audit_actual_fee": "100"},
             {"auditor_group": "other_or_unknown", "audit_actual_fee": "-500"},
+            {"auditor_group": "other_or_unknown", "audit_actual_fee": "nan"},
+            {"auditor_group": "other_or_unknown", "audit_actual_fee": "inf"},
         ]
 
         coverage, big4_share = reconcile.metric_summary(rows, "audit_actual_fee")
@@ -55,6 +58,7 @@ class ReconcileUniverseTests(unittest.TestCase):
             "audit_actual_hours": "1100",
             "auditor_source": "document.xml",
             "fee_source": "document.xml",
+            "audit_evidence_rcept_no": "20240101000001",
             "warnings": (
                 "document_fields_unresolved;"
                 "fnlttSinglAcntAll request failed: TimeoutError"
@@ -74,6 +78,7 @@ class ReconcileUniverseTests(unittest.TestCase):
             "audit_actual_hours",
             "auditor_source",
             "fee_source",
+            "audit_evidence_rcept_no",
         ):
             self.assertEqual(row[field], "")
         self.assertEqual(row["revenue"], "999000000")
@@ -83,6 +88,82 @@ class ReconcileUniverseTests(unittest.TestCase):
             "fnlttSinglAcntAll request failed: TimeoutError",
         )
         self.assertEqual(row["validation_status"], "pending")
+
+    def test_verified_override_records_evidence_and_can_clear_foreign_fees(self):
+        rows = [
+            {
+                "year": "2024",
+                "corp_code": "00000001",
+                "corp_name": "외화회사",
+                "audit_contract_fee": "100",
+                "audit_actual_fee": "100",
+                "audit_contract_hours": "1",
+                "audit_actual_hours": "1",
+                "warnings": "",
+            }
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "overrides.csv"
+            path.write_text(
+                "year,corp_code,corp_name,audit_contract_fee,audit_actual_fee,"
+                "audit_contract_hours,audit_actual_hours,"
+                "audit_evidence_rcept_no,override_status,override_reason\n"
+                "2024,00000001,외화회사,__NULL__,__NULL__,__NULL__,2405,"
+                "20250422000461,foreign_currency_excluded,CNY_excluded\n",
+                encoding="utf-8",
+            )
+            applied = reconcile.apply_verified_overrides(rows, path)
+
+        self.assertEqual(applied, 1)
+        self.assertEqual(rows[0]["audit_contract_fee"], "")
+        self.assertEqual(rows[0]["audit_actual_hours"], "2405")
+        self.assertEqual(rows[0]["fee_source"], "foreign_currency_excluded")
+        self.assertEqual(rows[0]["audit_evidence_rcept_no"], "20250422000461")
+        self.assertEqual(rows[0]["audit_metric_override_reason"], "CNY_excluded")
+        self.assertEqual(
+            rows[0]["audit_metric_override_status"],
+            "foreign_currency_excluded",
+        )
+        self.assertIn("foreign_currency_fee", rows[0]["warnings"])
+        self.assertIn("source_verified_override", rows[0]["warnings"])
+
+        reconcile.finalize_validation(rows)
+        self.assertEqual(rows[0]["validation_status"], "source_excluded")
+
+    def test_verified_override_rejects_nonfinite_values(self):
+        rows = [
+            {
+                "year": "2024",
+                "corp_code": "00000001",
+                "corp_name": "테스트회사",
+                "warnings": "",
+            }
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "overrides.csv"
+            path.write_text(
+                "year,corp_code,corp_name,audit_contract_fee,audit_actual_fee,"
+                "audit_contract_hours,audit_actual_hours,"
+                "audit_evidence_rcept_no,override_status,override_reason\n"
+                "2024,00000001,테스트회사,nan,100,1,1,"
+                "20250422000461,source_verified,bad_value\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "invalid audit_contract_fee"):
+                reconcile.apply_verified_overrides(rows, path)
+
+    def test_finalize_validation_rejects_negative_contract_fee(self):
+        rows = [
+            {
+                "auditor_raw": "테스트회계법인",
+                "audit_contract_fee": "-1",
+                "fee_source": "adtServcCnclsSttus",
+            }
+        ]
+
+        reconcile.finalize_validation(rows)
+
+        self.assertEqual(rows[0]["validation_status"], "unresolved")
 
     def test_primary_tables_choose_unique_maximum_term(self):
         document = """

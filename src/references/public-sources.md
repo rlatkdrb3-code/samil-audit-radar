@@ -30,7 +30,7 @@ This plugin is grounded in public audit disclosure and auditor appointment rules
 - OpenDART original disclosure file API: https://opendart.fss.or.kr/guide/detail.do?apiGrpCd=DS001&apiId=2019003
   - Downloads the exact receipt's original filing as a ZIP of XML files. The radar uses it only for recent structured-data gaps and requires agreement between primary audit-opinion and audit-service tables.
 - OpenDART periodic-report data downloads: https://opendart.fss.or.kr/disclosureinfo/fnltt/dwld/list.do
-  - Lists generated annual-report datasets, including the 2025 business-report dataset available before the 2026-07-23 snapshot refresh.
+  - Lists the 2025 business-report financial dataset generated on 2026-07-16. The dashboard independently reconciles the latest annual-report receipt for each company through the same cutoff.
 - DART company-by-company search: https://dart.fss.or.kr/dsab001/main.do
   - Public DART search exposes `외부감사관련` categories such as `감사보고서`, `연결감사보고서`, `결합감사보고서`, and `감사전재무제표미제출신고서`.
 - External Audit Act Enforcement Decree, audit report submission and public inspection: https://www.law.go.kr/LSW/lumLsLinkPop.do?lspttninfSeq=149589
@@ -73,5 +73,6 @@ This plugin is grounded in public audit disclosure and auditor appointment rules
   - Reports the newer historical count of 42,891 companies at the end of 2025.
 - Dashboard snapshot validation date: 2026-07-23.
   - Current annual-report-filer universe: 3,234 companies for 2023, 3,323 for 2024, and 3,343 for 2025.
+  - `audit_market_verified_overrides.csv` retains the DART corporation code, evidence receipt, review status, and reason for every source-reviewed correction, partial confirmation, foreign-currency exclusion, or unresolved disclosure conflict.
   - Rows with unresolved source-document reconciliation are excluded per metric when the numeric field is absent; negative and non-finite amounts are never included.
-  - The 2024 client revenue metric covers 2,876/3,323 companies and mixes the selected disclosed revenue/income account and consolidation scope, so it is labeled as a supplemental metric.
+  - Client revenue/income coverage is incomplete and mixes the selected disclosed account and consolidation scope, so it is labeled as a supplemental metric rather than whole-market revenue.

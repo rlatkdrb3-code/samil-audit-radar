@@ -58,7 +58,15 @@ PROVENANCE_FIELDS = [
     "fee_source",
     "revenue_source",
     "validation_status",
+    "audit_evidence_rcept_no",
+    "audit_metric_override_reason",
+    "audit_metric_override_status",
 ]
+DEFAULT_OVERRIDE_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "examples"
+    / "audit_market_verified_overrides.csv"
+)
 UNIT_MULTIPLIERS = {
     "백만원": 1_000_000,
     "천만원": 10_000_000,
@@ -142,9 +150,10 @@ def parse_number(value: Any) -> float | None:
     if not text or text == "-":
         return None
     try:
-        return float(text.replace(",", ""))
+        number = float(text.replace(",", ""))
     except ValueError:
         return None
+    return number if math.isfinite(number) else None
 
 
 def format_number(value: float | int | None) -> str:
@@ -651,7 +660,10 @@ def audit_metric_anomaly(row: dict[str, str]) -> bool:
     actual_hours = parse_number(row.get("audit_actual_hours"))
 
     values = (contract, actual, contract_hours, actual_hours)
-    if any(value is not None and (not math.isfinite(value) or value < 0) for value in values):
+    if any(
+        value is not None and (not math.isfinite(value) or value < 0)
+        for value in values
+    ):
         return True
     if contract is None or actual is None or actual == 0:
         return True
@@ -932,6 +944,146 @@ def save_csv(path: Path, rows: list[dict[str, str]], original_fields: list[str])
     temp.replace(path)
 
 
+def apply_verified_overrides(
+    rows: list[dict[str, str]],
+    path: Path | None,
+    *,
+    strict_targets: bool = False,
+) -> int:
+    """Apply source-reviewed exceptions while preserving their evidence trail."""
+    if path is None:
+        return 0
+    if not path.is_file():
+        raise FileNotFoundError(f"override file not found: {path}")
+    if len(rows) != len(
+        {(row.get("year", ""), row.get("corp_code", "")) for row in rows}
+    ):
+        raise ValueError("input rows contain duplicate year/corp_code keys")
+    by_key = {(row.get("year", ""), row.get("corp_code", "")): row for row in rows}
+    input_years = {row.get("year", "") for row in rows}
+    metric_fields = (
+        "audit_contract_fee",
+        "audit_actual_fee",
+        "audit_contract_hours",
+        "audit_actual_hours",
+    )
+    required_fields = {
+        "year",
+        "corp_code",
+        "corp_name",
+        *metric_fields,
+        "audit_evidence_rcept_no",
+        "override_status",
+        "override_reason",
+    }
+    valid_statuses = {
+        "source_verified",
+        "partial_source_verified",
+        "foreign_currency_excluded",
+        "source_conflict_excluded",
+    }
+    validated: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    with path.open(encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        missing_fields = required_fields - set(reader.fieldnames or [])
+        if missing_fields:
+            raise ValueError(
+                f"override file missing fields: {', '.join(sorted(missing_fields))}"
+            )
+        for line_number, raw_override in enumerate(reader, start=2):
+            override = {key: str(value or "").strip() for key, value in raw_override.items()}
+            key = (override["year"], override["corp_code"])
+            if not all(key):
+                raise ValueError(f"override line {line_number} has a blank key")
+            if key in seen:
+                raise ValueError(f"duplicate override key: {key[0]}/{key[1]}")
+            seen.add(key)
+            row = by_key.get(key)
+            if row is None:
+                if strict_targets and key[0] in input_years:
+                    raise ValueError(f"override target not found: {key[0]}/{key[1]}")
+                continue
+            if override["corp_name"] != row.get("corp_name", ""):
+                raise ValueError(
+                    f"override company mismatch for {key[0]}/{key[1]}: "
+                    f"{override['corp_name']} != {row.get('corp_name', '')}"
+                )
+            receipt = override["audit_evidence_rcept_no"]
+            if not re.fullmatch(r"\d{14}", receipt):
+                raise ValueError(
+                    f"override line {line_number} has an invalid evidence receipt"
+                )
+            status = override["override_status"]
+            if status not in valid_statuses:
+                raise ValueError(
+                    f"override line {line_number} has invalid status: {status}"
+                )
+            if not override["override_reason"]:
+                raise ValueError(f"override line {line_number} has no reason")
+            for field in metric_fields:
+                value = override[field]
+                if not value:
+                    raise ValueError(
+                        f"override line {line_number} has blank {field}; use __NULL__"
+                    )
+                if value == "__NULL__":
+                    continue
+                number = parse_number(value)
+                if number is None or number < 0:
+                    raise ValueError(
+                        f"override line {line_number} has invalid {field}: {value}"
+                    )
+            if status in {"foreign_currency_excluded", "source_conflict_excluded"}:
+                for field in ("audit_contract_fee", "audit_actual_fee"):
+                    if override[field] != "__NULL__":
+                        raise ValueError(
+                            f"override line {line_number} must clear {field}"
+                        )
+            elif status == "partial_source_verified":
+                fee_values = {
+                    override["audit_contract_fee"],
+                    override["audit_actual_fee"],
+                }
+                if "__NULL__" not in fee_values or len(fee_values) != 2:
+                    raise ValueError(
+                        f"override line {line_number} must verify exactly one fee"
+                    )
+            elif any(
+                override[field] == "__NULL__"
+                for field in ("audit_contract_fee", "audit_actual_fee")
+            ):
+                raise ValueError(
+                    f"override line {line_number} must verify both fee fields"
+                )
+            validated.append(override)
+
+    for override in validated:
+        row = by_key[(override["year"], override["corp_code"])]
+        for field in metric_fields:
+            value = override[field]
+            if not value:
+                continue
+            row[field] = "" if value == "__NULL__" else value
+        row["audit_evidence_rcept_no"] = override["audit_evidence_rcept_no"]
+        row["audit_metric_override_reason"] = override["override_reason"]
+        status = override["override_status"]
+        row["audit_metric_override_status"] = status
+        if status == "foreign_currency_excluded":
+            row["fee_source"] = "foreign_currency_excluded"
+            append_warning(row, "foreign_currency_fee")
+        elif status == "source_conflict_excluded":
+            row["fee_source"] = "source_conflict_excluded"
+            append_warning(row, "source_disclosed_metric_conflict")
+        elif status == "partial_source_verified":
+            row["fee_source"] = "document.xml:verified_override"
+            append_warning(row, "source_disclosed_metric_conflict")
+        else:
+            row["fee_source"] = "document.xml:verified_override"
+        append_warning(row, "source_verified_override")
+    return len(validated)
+
+
 def clear_audit_fields(row: dict[str, str]) -> None:
     for field in (
         "auditor_raw",
@@ -941,6 +1093,9 @@ def clear_audit_fields(row: dict[str, str]) -> None:
         "audit_actual_hours",
         "auditor_source",
         "fee_source",
+        "audit_evidence_rcept_no",
+        "audit_metric_override_reason",
+        "audit_metric_override_status",
     ):
         row[field] = ""
     row["auditor_group"] = "other_or_unknown"
@@ -950,6 +1105,49 @@ def clear_audit_fields(row: dict[str, str]) -> None:
         if "fnlttSinglAcntAll" in warning
     )
     row["validation_status"] = "pending"
+
+
+def initialize_provenance(rows: list[dict[str, str]]) -> None:
+    for row in rows:
+        row["auditor_group"] = normalize_auditor(row.get("auditor_raw", ""))
+        row["auditor_source"] = row.get("auditor_source") or (
+            "adtServcCnclsSttus" if row.get("auditor_raw") else ""
+        )
+        row["fee_source"] = row.get("fee_source") or (
+            "adtServcCnclsSttus" if row.get("audit_contract_fee") else ""
+        )
+        row["revenue_source"] = row.get("revenue_source") or (
+            "fnlttSinglAcntAll" if row.get("revenue") else ""
+        )
+
+
+def finalize_validation(rows: list[dict[str, str]]) -> None:
+    for row in rows:
+        row["auditor_group"] = normalize_auditor(row.get("auditor_raw", ""))
+        auditor_ok = bool(row.get("auditor_raw", "").strip())
+        contract_fee = parse_number(row.get("audit_contract_fee"))
+        fees_ok = contract_fee is not None and contract_fee >= 0
+        if row.get("fee_source", "") in {
+            "foreign_currency_excluded",
+            "source_conflict_excluded",
+        }:
+            row["validation_status"] = "source_excluded"
+        elif row.get("audit_metric_override_status") == "partial_source_verified":
+            row["validation_status"] = "source_partially_verified"
+        elif auditor_ok and fees_ok:
+            row["validation_status"] = (
+                "source_verified"
+                if any(
+                    "document.xml" in source
+                    for source in (
+                        row.get("auditor_source", ""),
+                        row.get("fee_source", ""),
+                    )
+                )
+                else "api_complete"
+            )
+        else:
+            row["validation_status"] = "unresolved"
 
 
 def metric_summary(rows: list[dict[str, str]], field: str) -> tuple[int, float]:
@@ -1004,17 +1202,53 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Discard and refetch only mechanically suspicious audit metrics.",
     )
+    parser.add_argument(
+        "--overrides",
+        type=Path,
+        default=DEFAULT_OVERRIDE_PATH,
+        help="Source-reviewed metric exceptions applied after API reconciliation.",
+    )
+    parser.add_argument(
+        "--apply-overrides-only",
+        action="store_true",
+        help="Apply the reviewed override file without calling OpenDART.",
+    )
+    parser.add_argument(
+        "--strict-overrides",
+        action="store_true",
+        help="Fail when an override target is absent from an included input year.",
+    )
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
+    rows, original_fields = load_csv(args.input)
+    if args.apply_overrides_only:
+        initialize_provenance(rows)
+        override_count = apply_verified_overrides(
+            rows,
+            args.overrides,
+            strict_targets=True,
+        )
+        finalize_validation(rows)
+        rows.sort(
+            key=lambda row: (
+                row.get("year", ""),
+                row.get("corp_name", ""),
+                row.get("corp_code", ""),
+            )
+        )
+        save_csv(args.output, rows, original_fields)
+        print(f"source-reviewed metric overrides: {override_count:,}")
+        print_summary(rows, args.years)
+        return 0
+
     api_key = os.environ.get("DART_API_KEY", "").strip()
     if not api_key:
         print("DART_API_KEY is required", file=sys.stderr)
         return 2
 
-    rows, original_fields = load_csv(args.input)
     client = DartClient(api_key)
     changed_receipts: set[tuple[str, str]] = set()
     if not args.skip_universe_refresh:
@@ -1041,17 +1275,7 @@ def main() -> int:
         for row in repair_rows:
             clear_audit_fields(row)
 
-    for row in selected_rows:
-        row["auditor_group"] = normalize_auditor(row.get("auditor_raw", ""))
-        row["auditor_source"] = row.get("auditor_source") or (
-            "adtServcCnclsSttus" if row.get("auditor_raw") else ""
-        )
-        row["fee_source"] = row.get("fee_source") or (
-            "adtServcCnclsSttus" if row.get("audit_contract_fee") else ""
-        )
-        row["revenue_source"] = row.get("revenue_source") or (
-            "fnlttSinglAcntAll" if row.get("revenue") else ""
-        )
+    initialize_provenance(rows)
 
     forced_keys = {
         (row.get("year", ""), row.get("corp_code", ""))
@@ -1188,18 +1412,15 @@ def main() -> int:
             elif error and error != "revenue_unavailable":
                 append_warning(row, error)
 
-    for row in selected_rows:
-        row["auditor_group"] = normalize_auditor(row.get("auditor_raw", ""))
-        auditor_ok = bool(row.get("auditor_raw", "").strip())
-        fees_ok = parse_number(row.get("audit_contract_fee")) is not None
-        if auditor_ok and fees_ok:
-            row["validation_status"] = (
-                "source_verified"
-                if "document.xml" in (row.get("auditor_source"), row.get("fee_source"))
-                else "api_complete"
-            )
-        else:
-            row["validation_status"] = "unresolved"
+    override_count = apply_verified_overrides(
+        rows,
+        args.overrides,
+        strict_targets=args.strict_overrides,
+    )
+    if override_count:
+        print(f"source-reviewed metric overrides: {override_count:,}")
+
+    finalize_validation(rows)
 
     rows.sort(key=lambda row: (row.get("year", ""), row.get("corp_name", ""), row.get("corp_code", "")))
     save_csv(args.output, rows, original_fields)
