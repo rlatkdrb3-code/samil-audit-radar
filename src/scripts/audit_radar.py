@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import os
 import re
@@ -16,6 +17,7 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
+from functools import lru_cache
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
@@ -758,10 +760,46 @@ def text_of(node: ElementTree.Element, tag: str) -> str:
     return child.text.strip() if child is not None and child.text else ""
 
 
-def search_companies(query: str, config: AppConfig, *, limit: int = 10) -> list[dict[str, str]]:
+@lru_cache(maxsize=1)
+def load_bundled_companies() -> tuple[dict[str, str], ...]:
+    """Build a fast listed-company index from the bundled annual-report dataset."""
+    if not MARKET_SHARE_CSV.is_file():
+        return ()
+
+    latest_by_code: dict[str, dict[str, str]] = {}
+    with MARKET_SHARE_CSV.open("r", encoding="utf-8-sig", newline="") as handle:
+        for row in csv.DictReader(handle):
+            corp_code = str(row.get("corp_code", "")).strip()
+            corp_name = str(row.get("corp_name", "")).strip()
+            if not corp_code or not corp_name:
+                continue
+            year = str(row.get("year", "")).strip()
+            existing = latest_by_code.get(corp_code)
+            if existing and existing.get("_year", "") > year:
+                continue
+            latest_by_code[corp_code] = {
+                "corp_code": corp_code,
+                "corp_name": corp_name,
+                "stock_code": str(row.get("stock_code", "")).strip(),
+                "corp_cls": str(row.get("corp_cls", "")).strip(),
+                "modify_date": "",
+                "_year": year,
+            }
+
+    return tuple(
+        {key: value for key, value in company.items() if key != "_year"}
+        for company in latest_by_code.values()
+    )
+
+
+def rank_company_matches(
+    query: str,
+    companies: Any,
+    *,
+    limit: int,
+) -> list[dict[str, str]]:
     normalized = normalize_search(query[:80])
     limit = max(1, min(20, limit))
-    companies = load_corp_codes(config)
     scored = []
     for company in companies:
         if not is_listed_search_candidate(company):
@@ -786,6 +824,22 @@ def search_companies(query: str, config: AppConfig, *, limit: int = 10) -> list[
     return [item for _, item in scored[:limit]]
 
 
+def search_companies(
+    query: str,
+    config: AppConfig,
+    *,
+    limit: int = 10,
+    remote_fallback: bool = True,
+) -> list[dict[str, str]]:
+    if config.demo:
+        return rank_company_matches(query, load_demo_companies(), limit=limit)
+
+    bundled_matches = rank_company_matches(query, load_bundled_companies(), limit=limit)
+    if bundled_matches or not remote_fallback:
+        return bundled_matches
+    return rank_company_matches(query, load_corp_codes(config), limit=limit)
+
+
 def is_listed_search_candidate(company: dict[str, str]) -> bool:
     return bool(str(company.get("stock_code", "")).strip()) or company.get("corp_cls") in LISTED_CORP_CLASSES
 
@@ -804,6 +858,9 @@ def resolve_company(company: str, config: AppConfig, corp_code: str | None = Non
     if config.demo:
         return load_demo_companies()[0]
     if corp_code:
+        for bundled in load_bundled_companies():
+            if bundled.get("corp_code") == corp_code:
+                return dict(bundled)
         return {"corp_code": corp_code, "corp_name": company, "stock_code": "", "modify_date": ""}
     matches = search_companies(company, config, limit=5)
     if not matches:
@@ -3782,7 +3839,15 @@ def make_handler(config: AppConfig) -> type[BaseHTTPRequestHandler]:
                         return
                     cache_key = f"search:{q}"
                     self.respond_json(
-                        cached(cache_key, lambda: search_companies(q, config, limit=10))
+                        cached(
+                            cache_key,
+                            lambda: search_companies(
+                                q,
+                                config,
+                                limit=10,
+                                remote_fallback=False,
+                            ),
+                        )
                     )
                     return
                 if parsed.path == "/api/recommend":
@@ -4075,16 +4140,30 @@ INDEX_HTML = r"""<!doctype html>
     $("searchBtn").addEventListener("click", search);
     $("query").addEventListener("keydown", (event) => { if (event.key === "Enter") search(); });
 
-    async function getJson(url) {
-      const res = await fetch(url);
-      const data = await res.json();
-      if (!res.ok || data.error) throw new Error(data.error || "요청 실패");
-      return data;
+    async function getJson(url, timeoutMs = 15000) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const res = await fetch(url, { signal: controller.signal });
+        const data = await res.json();
+        if (!res.ok || data.error) throw new Error(data.error || "요청 실패");
+        return data;
+      } catch (err) {
+        if (err.name === "AbortError") {
+          throw new Error("응답 시간이 초과되었습니다. 잠시 뒤 다시 시도해 주세요.");
+        }
+        throw err;
+      } finally {
+        clearTimeout(timer);
+      }
     }
 
     async function search() {
       const q = $("query").value.trim();
       if (!q) return;
+      const button = $("searchBtn");
+      button.disabled = true;
+      button.textContent = "검색 중";
       $("status").textContent = "검색 중...";
       $("results").innerHTML = "";
       $("resultStrip").hidden = true;
@@ -4097,10 +4176,13 @@ INDEX_HTML = r"""<!doctype html>
         </button>`).join("") : `<span class="empty-results">검색 결과가 없습니다.</span>`;
         document.querySelectorAll(".company").forEach(btn => btn.addEventListener("click", () => loadReport(btn.dataset.name, btn.dataset.code)));
         if (rows.length === 1) {
-          await loadReport(rows[0].corp_name, rows[0].corp_code);
+          loadReport(rows[0].corp_name, rows[0].corp_code);
         }
       } catch (err) {
         $("status").textContent = err.message;
+      } finally {
+        button.disabled = false;
+        button.textContent = "검색";
       }
     }
 
@@ -4109,7 +4191,7 @@ INDEX_HTML = r"""<!doctype html>
       $("status").textContent = "리포트 생성 중...";
       try {
         const years = $("years").value;
-        const data = await getJson(`/api/report?company=${encodeURIComponent(name)}&corp_code=${encodeURIComponent(code)}&years=${years}`);
+        const data = await getJson(`/api/report?company=${encodeURIComponent(name)}&corp_code=${encodeURIComponent(code)}&years=${years}`, 75000);
         renderReport(data);
         $("status").textContent = "완료";
       } catch (err) {
