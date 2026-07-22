@@ -321,7 +321,11 @@ def parse_hours(cell: str) -> int | None:
     if not match:
         return None
     value = match.group(1).rstrip(".,")
-    if re.fullmatch(r"\d{1,3}(?:[,.]\d{3})+", value):
+    if "," in value:
+        normalized = value.replace(",", "")
+        if re.fullmatch(r"\d+(?:\.\d+)?", normalized):
+            return round(float(normalized))
+    if re.fullmatch(r"\d{1,3}(?:\.\d{3})+", value):
         return int(re.sub(r"[,.]", "", value))
     if re.fullmatch(r"\d+(?:\.\d+)?", value):
         return round(float(value))
@@ -330,7 +334,7 @@ def parse_hours(cell: str) -> int | None:
 
 def table_cells(row_html: str) -> list[str]:
     values = re.findall(
-        r"<(?:TD|TH|TE)\b[^>]*>(.*?)</(?:TD|TH|TE)>",
+        r"<(?:TD|TH|TE|TU)\b[^>]*>(.*?)</(?:TD|TH|TE|TU)>",
         row_html,
         flags=re.I | re.S,
     )
@@ -572,7 +576,20 @@ def parse_audit_service_api_rows(rows: list[dict[str, Any]]) -> dict[str, Any] |
     }
     if len(current) > 1 and len(auditors) != 1:
         return None
-    return current[0]
+    return max(
+        current,
+        key=lambda item: sum(
+            item.get(field) not in (None, "")
+            for field in (
+                "auditor",
+                "contract_fee",
+                "actual_fee",
+                "contract_hours",
+                "actual_hours",
+                "rcept_no",
+            )
+        ),
+    )
 
 
 def fetch_audit_service_api(
@@ -677,8 +694,19 @@ def fetch_revenue(
 def run_parallel(function: Any, items: list[Any], workers: int) -> list[Any]:
     if not items:
         return []
+
+    def guarded(item: Any) -> Any:
+        try:
+            return function(item)
+        except Exception as exc:  # noqa: BLE001
+            if isinstance(item, dict):
+                key = (str(item.get("year", "")), str(item.get("corp_code", "")))
+            else:
+                key = ("", "")
+            return key, None, f"{type(exc).__name__}: {exc}"
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
-        return list(executor.map(function, items))
+        return list(executor.map(guarded, items))
 
 
 def load_csv(path: Path) -> tuple[list[dict[str, str]], list[str]]:
@@ -736,7 +764,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--years", nargs="+", type=int, default=[2023, 2024])
+    parser.add_argument("--years", nargs="+", type=int, default=[2023, 2024, 2025])
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--skip-universe-refresh", action="store_true")
     parser.add_argument("--skip-revenue", action="store_true")

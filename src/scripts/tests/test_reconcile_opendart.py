@@ -77,6 +77,7 @@ class ReconcileUniverseTests(unittest.TestCase):
     def test_hours_accept_korean_thousands_separators(self):
         self.assertEqual(reconcile.parse_hours("39.012"), 39012)
         self.assertEqual(reconcile.parse_hours("40,370"), 40370)
+        self.assertEqual(reconcile.parse_hours("1,200.00"), 1200)
 
     def test_structured_audit_rows_choose_current_term_and_parse_units(self):
         rows = [
@@ -102,6 +103,22 @@ class ReconcileUniverseTests(unittest.TestCase):
         self.assertEqual(parsed["actual_fee"], 1_100_000_000)
         self.assertEqual(parsed["contract_hours"], 10_000)
         self.assertEqual(parsed["actual_hours"], 10_500)
+
+    def test_parallel_row_failure_does_not_abort_the_batch(self):
+        rows = [
+            {"year": "2025", "corp_code": "ok"},
+            {"year": "2025", "corp_code": "bad"},
+        ]
+
+        def task(row):
+            if row["corp_code"] == "bad":
+                raise ValueError("bad row")
+            return (row["year"], row["corp_code"]), {"ok": True}, ""
+
+        results = reconcile.run_parallel(task, rows, workers=2)
+        self.assertEqual(results[0][1], {"ok": True})
+        self.assertIsNone(results[1][1])
+        self.assertIn("ValueError", results[1][2])
 
 
 if __name__ == "__main__":

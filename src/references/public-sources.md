@@ -27,6 +27,10 @@ This plugin is grounded in public audit disclosure and auditor appointment rules
   - Provides non-audit service contracts with the statutory auditor from periodic reports.
 - OpenDART disclosure search API: https://opendart.fss.or.kr/guide/detail.do?apiGrpCd=DS001&apiId=2019001
   - Supports `pblntf_ty=F` for external-audit-related filings, including audit reports, consolidated audit reports, combined audit reports, accounting-firm business reports, and pre-audit financial statement non-submission notices.
+- OpenDART original disclosure file API: https://opendart.fss.or.kr/guide/detail.do?apiGrpCd=DS001&apiId=2019003
+  - Downloads the exact receipt's original filing as a ZIP of XML files. The radar uses it only for recent structured-data gaps and requires agreement between primary audit-opinion and audit-service tables.
+- OpenDART periodic-report data downloads: https://opendart.fss.or.kr/disclosureinfo/fnltt/dwld/list.do
+  - Lists generated annual-report datasets, including the 2025 business-report dataset available before the 2026-07-23 snapshot refresh.
 - DART company-by-company search: https://dart.fss.or.kr/dsab001/main.do
   - Public DART search exposes `외부감사관련` categories such as `감사보고서`, `연결감사보고서`, `결합감사보고서`, and `감사전재무제표미제출신고서`.
 - External Audit Act Enforcement Decree, audit report submission and public inspection: https://www.law.go.kr/LSW/lumLsLinkPop.do?lspttninfSeq=149589
