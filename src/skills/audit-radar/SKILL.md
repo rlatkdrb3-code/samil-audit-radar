@@ -1,6 +1,6 @@
 ---
 name: audit-radar
-description: Use when checking a Korean listed company's external auditor history, expected auditor replacement or reappointment timing, audit fee/time, executive disclosures, OpenDART audit disclosures, or public external-auditor tender and appointment notices.
+description: Check a Korean listed company's latest completed-year auditor, auditor-history freshness and gaps, source-confirmed appointment period, audit fee/time, executive disclosures, OpenDART audit disclosures, and public external-auditor tender or appointment notices. Use for auditor-history research or appointment/reappointment timing questions, but require an official appointment source before presenting a company-specific period, date, or D-day.
 ---
 
 # Audit Appointment Radar
@@ -9,7 +9,7 @@ Use this skill to summarize public external-auditor appointment information for 
 
 The scope is intentionally narrow:
 
-> For a listed company, show the current auditor, recent auditor history, estimated auditor-change or reappointment review timing, executive disclosure signals, audit service fee/time, and whether an external-auditor tender or appointment notice is publicly identifiable.
+> For a listed company, show the latest completed-year auditor, recent auditor history and data gaps, any source-confirmed appointment period, executive disclosure signals, audit service fee/time, and whether an external-auditor tender or appointment notice is publicly identifiable.
 
 Do not expand the answer into audit-sales lead scoring, RFP proposal drafting, internal personnel matching, CRM relationship analysis, independence acceptance, or private accounting-firm data. If the user uploads a private RFP or internal dataset, treat it as separate user-provided context and clearly label that it is outside the public OpenDART-only baseline.
 
@@ -23,7 +23,7 @@ Use public information only:
 - OpenDART "임원 현황" API for executive name, position, registered/full-time status, duty, major career, tenure, and tenure-end fields.
 - OpenDART annual-report and regular-disclosure search for latest available business-year coverage.
 - OpenDART disclosure search for `외부감사관련` filings, including auditor appointment, auditor change, tender, proposal-request, delayed submission, and corrected audit-related filings.
-- Public company IR, notice, procurement, or tender pages only when the user asks for public auditor tender notices beyond OpenDART.
+- Public company IR, KRX, notice, procurement, or tender pages when a company-specific appointment period or tender status is needed beyond OpenDART.
 - Public FSC/FSS guidance on external auditor appointment and periodic designation, when explaining the rule basis.
 
 Do not claim access to a law firm's or accounting firm's internal CRM, staff pool, independence database, proposal archive, or private RFP file. OpenDART executive data has a `main_career` text field, but no stable structured education field, so education or network clues must be described only as possible text clues requiring original-source review.
@@ -43,16 +43,17 @@ The tool reads the DART API key from `DART_API_KEY`, `OPEN_DART_API_KEY`, `OPEND
 
 ## Interpretation Rules
 
-Always label timing analysis as an estimate. Public DART data does not always reveal whether an auditor was freely appointed, periodically designated, deferred, or designated for another reason.
+Do not derive a company-specific appointment period or future date from auditor-name continuity. Public DART history does not establish whether an auditor was freely appointed, reappointed, periodically designated, deferred, or designated for another reason.
 
 Strongly supported statements:
 
-- Current auditor shown in the latest available annual report.
+- Auditor for the latest completed business year actually observed in the structured annual-report data.
 - Recent auditor names and audit opinions shown in OpenDART annual-report API results.
 - Legal/market category from OpenDART `corp_cls`: Y = KOSPI, K = KOSDAQ, N = KONEX, E = other.
 - Audit service fee/time fields and hourly fee when present in the annual report API response.
 - Executive status fields when present in the annual report API response.
 - Public notice existence when a matching OpenDART filing or company notice URL is found.
+- Appointment auditor and target period when both are stated in a linked company IR, KRX, or DART original source.
 
 Inference-based statements:
 
@@ -62,11 +63,20 @@ Inference-based statements:
 
 Statements that need follow-up:
 
-- Whether the current auditor is freely appointed or designated.
+- Whether the latest completed-year auditor remains the current auditor.
+- The current appointment's start and end years when no official appointment source is linked.
 - Whether the current auditor was designated for periodic designation, split designation, penalty designation, or another reason.
 - Exact FSS notification timing for a specific company.
 - Whether a missing public notice means no tender exists.
 - Whether a missing public filing is a legal non-submission, delayed submission, non-subject year, or naming/API mismatch.
+
+Apply these guardrails:
+
+- Treat consecutive auditor-name rows as history, not as one appointment contract.
+- If the latest expected completed business year is missing, label `data gap`; do not call an older auditor current.
+- If no official appointment source states the target period, output `현재 선임기간 원문 확인` and omit dates, D-day, and urgency.
+- Do not infer periodic-designation timing from same-auditor tenure.
+- Do not use a filing-list submitter name as the auditor unless the original filing verifies it.
 
 ## Output Style
 
@@ -75,9 +85,10 @@ For Korean users, answer in Korean.
 Lead with:
 
 - 대상 회사
-- 현재 감사인
+- 최근 완료연도 확인 감사인 and observed business year
+- latest-year data status or gap
 - 최근 감사인 이력
-- 교체/재선임 검토 예상시기 and D-day
+- source-confirmed appointment period, or `현재 선임기간 원문 확인`
 - 기준 근거 and source labels
 - 감사용역 보수, 감사시간, 시간당 보수 when available
 - 외부감사인 입찰/선임 공고 확인 여부 and URL when available
@@ -87,7 +98,7 @@ Lead with:
 Then show:
 
 - year-by-year audit history table
-- chronological appointment/rotation timeline
+- appointment-source verification status; include a chronological period only when source-confirmed
 - audit service fee/time table
 - executive disclosure table
 - tender or appointment notice table

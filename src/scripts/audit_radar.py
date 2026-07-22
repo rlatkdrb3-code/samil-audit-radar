@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import calendar
 import csv
 import json
 import os
@@ -923,7 +924,17 @@ def build_report(
     corp = enrich_company(corp, company_profile)
     if not is_listed_company(corp):
         raise RuntimeError("현재 버전은 코스피·코스닥·코넥스 상장사만 지원합니다.")
-    structured_history = fetch_audit_history(corp["corp_code"], config, years=years)
+    as_of = today_kst()
+    latest_completed_year = latest_completed_business_year(
+        as_of,
+        resolve_fiscal_end_month(corp, company_profile),
+    )
+    structured_history = fetch_audit_history(
+        corp["corp_code"],
+        config,
+        years=years,
+        latest_business_year=latest_completed_year,
+    )
     annual_report_filings = fetch_annual_report_filings(corp["corp_code"], config, years=years)
     disclosure_bundle = fetch_external_audit_disclosures(corp["corp_code"], config, years=years)
     audit_history = merge_audit_sources(
@@ -931,8 +942,8 @@ def build_report(
         disclosure_bundle["history"],
         years=years,
     )
-    first_requested_year = config.current_year - years
-    last_requested_year = config.current_year - 1
+    last_requested_year = latest_completed_year
+    first_requested_year = last_requested_year - years + 1
     audit_history = [
         row
         for row in audit_history
@@ -940,14 +951,24 @@ def build_report(
         <= int_or_zero(row.get("bsns_year"))
         <= last_requested_year
     ]
-    service_history = fetch_service_contracts(corp["corp_code"], config, years=min(years, 5))
-    executive_history = fetch_executive_status(corp["corp_code"], config, years=min(years, 3))
+    service_history = fetch_service_contracts(
+        corp["corp_code"],
+        config,
+        years=min(years, 5),
+        latest_business_year=latest_completed_year,
+    )
+    executive_history = fetch_executive_status(
+        corp["corp_code"],
+        config,
+        years=min(years, 3),
+        latest_business_year=latest_completed_year,
+    )
     analysis = analyze_history(corp, audit_history, config.current_year)
     attach_event_schedule(
         corp,
         company_profile,
         analysis,
-        as_of=today_kst(),
+        as_of=as_of,
         executives=executive_history,
         special_issues=disclosure_bundle["special_issues"],
         tender_notices=disclosure_bundle["tender_notices"],
@@ -965,8 +986,10 @@ def build_report(
         annual_report_filings,
         years=years,
         current_year=config.current_year,
+        latest_business_year=latest_completed_year,
         external_error=disclosure_bundle.get("error"),
     )
+    attach_coverage_status(analysis, coverage)
     sales_strategy = build_sales_strategy(
         corp,
         analysis,
@@ -1020,9 +1043,15 @@ def build_report(
     }
 
 
-def fetch_audit_history(corp_code: str, config: AppConfig, *, years: int) -> list[dict[str, Any]]:
+def fetch_audit_history(
+    corp_code: str,
+    config: AppConfig,
+    *,
+    years: int,
+    latest_business_year: int | None = None,
+) -> list[dict[str, Any]]:
     rows_by_year: dict[str, dict[str, Any]] = {}
-    start_year = config.current_year - 1
+    start_year = latest_business_year or config.current_year - 1
     fetch_years = list(range(start_year, start_year - years - 2, -1))
     for year, rows in fetch_yearly_payloads(
         "accnutAdtorNmNdAdtOpinion",
@@ -1030,7 +1059,7 @@ def fetch_audit_history(corp_code: str, config: AppConfig, *, years: int) -> lis
         config,
         fetch_years,
     ):
-        for row in select_current_period_rows(rows):
+        for row in select_current_period_rows(rows, report_year=year):
             auditor = str(row.get("adtor", "")).strip()
             if not auditor:
                 continue
@@ -1136,7 +1165,17 @@ def fetch_annual_report_filings(
         filing["source_detail"] = "DART 정기공시 사업보고서 목록"
         annual_reports.append(filing)
     annual_reports.sort(key=lambda row: row.get("rcept_dt", ""), reverse=True)
-    return annual_reports[:years]
+    reports_by_year: dict[str, dict[str, Any]] = {}
+    for filing in annual_reports:
+        business_year = str(filing.get("business_year", "")).strip()
+        if business_year and business_year not in reports_by_year:
+            reports_by_year[business_year] = filing
+    distinct_reports = list(reports_by_year.values())
+    distinct_reports.sort(
+        key=lambda row: int_or_zero(row.get("business_year")),
+        reverse=True,
+    )
+    return distinct_reports[:years]
 
 
 def annual_report_business_year(filing: dict[str, Any]) -> str:
@@ -1225,9 +1264,6 @@ def is_external_audit_report_filing(filing: dict[str, Any]) -> bool:
 
 
 def filing_to_history_row(filing: dict[str, Any]) -> dict[str, Any] | None:
-    auditor = filing.get("flr_nm", "").strip()
-    if not is_meaningful_value(auditor):
-        return None
     business_year = filing.get("period_year") or infer_business_year_from_receipt(
         filing.get("rcept_dt", "")
     )
@@ -1235,7 +1271,9 @@ def filing_to_history_row(filing: dict[str, Any]) -> dict[str, Any] | None:
         return None
     return {
         "bsns_year": business_year,
-        "adtor": auditor,
+        "adtor": "",
+        "filing_submitter": filing.get("flr_nm", "").strip(),
+        "auditor_verified": False,
         "adt_opinion": "",
         "corp_cls": filing.get("corp_cls", ""),
         "corp_code": filing.get("corp_code", ""),
@@ -1247,7 +1285,7 @@ def filing_to_history_row(filing: dict[str, Any]) -> dict[str, Any] | None:
         "period_label": report_period_label(filing),
         "source_kind": "external_audit_report",
         "source_detail": "외부감사관련 감사보고서 공시목록",
-        "source_note": "감사인은 공시목록 제출인 기준이며 감사의견은 원문 확인이 필요합니다.",
+        "source_note": "공시목록 제출인명은 감사인으로 사용하지 않으며, 감사인은 원문 확인이 필요합니다.",
     }
 
 
@@ -1325,6 +1363,8 @@ def merge_audit_sources(
 ) -> list[dict[str, Any]]:
     rows_by_year: dict[str, dict[str, Any]] = {}
     for row in external_history:
+        if not row.get("auditor_verified") or not is_meaningful_value(row.get("adtor", "")):
+            continue
         year = str(row.get("bsns_year", "")).strip()
         if year:
             rows_by_year[year] = dict(row)
@@ -1347,23 +1387,28 @@ def build_coverage_summary(
     *,
     years: int,
     current_year: int,
+    latest_business_year: int | None = None,
     external_error: str | None,
 ) -> dict[str, Any]:
     history_years = {str(row.get("bsns_year", "")).strip() for row in history}
     annual_report_years = {str(row.get("business_year", "")).strip() for row in annual_report_filings if str(row.get("business_year", "")).strip()}
-    requested_years = [str(year) for year in range(current_year - 1, current_year - years - 1, -1)]
+    latest_requested_year = latest_business_year or current_year - 1
+    requested_years = [
+        str(year)
+        for year in range(latest_requested_year, latest_requested_year - years, -1)
+    ]
     annual_report_gap_years = [year for year in requested_years if year in annual_report_years and year not in history_years]
-    missing_recent_years = [year for year in requested_years if year not in history_years and year not in annual_report_years]
+    missing_requested_years = [year for year in requested_years if year not in history_years and year not in annual_report_years]
     notes = [
-        "정기보고서 주요정보 API를 우선 사용하고, 누락 연도는 외부감사관련 감사보고서 공시목록으로 보완합니다."
+        "감사인명은 정기보고서 주요정보 API에서 확인된 값만 사용합니다. 외부감사관련 공시목록의 제출인명은 감사인으로 대체하지 않습니다."
     ]
     if annual_report_gap_years:
         notes.append(
             "사업보고서는 확인되지만 감사인명 구조화 API에서 감사인 이력을 추출하지 못한 연도는 원문 사업보고서 또는 회사 IR 감사보고서로 보완 확인이 필요합니다."
         )
-    if missing_recent_years:
+    if missing_requested_years:
         notes.append(
-            "최근 연도 중 감사인 이력이 확인되지 않은 연도는 미제출, 제출 지연, 비대상, 명칭 불일치 가능성을 구분해 원문 확인이 필요합니다."
+            "요청 범위 중 감사인 이력과 사업보고서가 모두 확인되지 않은 연도는 미제출, 제출 지연, 비대상, 명칭 불일치 가능성을 구분해 원문 확인이 필요합니다."
         )
     if external_error:
         notes.append(f"외부감사관련 공시검색 보조 조회 실패: {external_error}")
@@ -1376,9 +1421,35 @@ def build_coverage_summary(
         "annual_report_years": sorted(annual_report_years, reverse=True),
         "annual_report_gap_years": annual_report_gap_years,
         "special_issue_rows": len(special_issues),
-        "missing_recent_years": missing_recent_years,
+        "missing_requested_years": missing_requested_years,
+        "missing_recent_years": missing_requested_years,
         "notes": notes,
     }
+
+
+def attach_coverage_status(analysis: dict[str, Any], coverage: dict[str, Any]) -> None:
+    if analysis.get("status") != "ok":
+        return
+    requested_years = coverage.get("requested_years") or []
+    expected_latest = str(requested_years[0]) if requested_years else ""
+    observed_latest = str(analysis.get("latest_business_year") or "")
+    if expected_latest and observed_latest != expected_latest:
+        analysis["data_quality_status"] = "data_gap"
+        analysis["data_quality_message"] = (
+            f"최신 완료 사업연도 기준은 {expected_latest}년이지만 감사인명은 {observed_latest or '미확인'}년까지 확인됩니다. "
+            "오래된 감사인을 현재 감사인으로 간주하지 않으며, 최신 사업보고서·회사 IR 원문 확인이 필요합니다."
+        )
+    else:
+        analysis["data_quality_status"] = "latest_year_observed"
+        analysis["data_quality_message"] = (
+            f"{observed_latest} 사업연도 감사인명이 구조화 공시에서 확인됩니다. "
+            "현재 선임기간과 후속 선임 결과는 별도 원문 확인이 필요합니다."
+        )
+    verification = analysis.get("timeline_verification") or {}
+    if verification and analysis.get("data_quality_status") == "data_gap":
+        verification["detail"] = (
+            analysis["data_quality_message"] + " " + str(verification.get("detail") or "")
+        )
 
 
 def dart_viewer_url(rcept_no: Any) -> str:
@@ -1422,12 +1493,34 @@ def fetch_yearly_payloads(
     return results
 
 
-def select_current_period_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def select_current_period_rows(
+    rows: list[dict[str, Any]],
+    *,
+    report_year: int | None = None,
+) -> list[dict[str, Any]]:
     valid = [row for row in rows if is_meaningful_value(row.get("adtor", ""))]
     current = [row for row in valid if is_current_period_row(row)]
     if current:
         return current
-    return valid[:1]
+    if report_year is not None:
+        explicit_year = [
+            row
+            for row in valid
+            if str(row.get("bsns_year", "")).strip() == str(report_year)
+        ]
+        if explicit_year:
+            return explicit_year
+    term_rows = [
+        (period_term_number(row.get("bsns_year", "")), row)
+        for row in valid
+    ]
+    numbered = [(number, row) for number, row in term_rows if number is not None]
+    if numbered:
+        max_term = max(number for number, _ in numbered)
+        candidates = [row for number, row in numbered if number == max_term]
+        if len(candidates) == 1:
+            return candidates
+    return valid if len(valid) == 1 else []
 
 
 def is_meaningful_value(value: Any) -> bool:
@@ -1460,9 +1553,15 @@ def row_priority(row: dict[str, Any]) -> int:
     return score
 
 
-def fetch_service_contracts(corp_code: str, config: AppConfig, *, years: int) -> list[dict[str, Any]]:
+def fetch_service_contracts(
+    corp_code: str,
+    config: AppConfig,
+    *,
+    years: int,
+    latest_business_year: int | None = None,
+) -> list[dict[str, Any]]:
     contracts_by_year: dict[str, dict[str, Any]] = {}
-    start_year = config.current_year - 1
+    start_year = latest_business_year or config.current_year - 1
     fetch_years = list(range(start_year, start_year - years, -1))
     for year, rows in fetch_yearly_payloads("adtServcCnclsSttus", corp_code, config, fetch_years):
         for row in normalize_service_contract_rows(rows, year):
@@ -1590,10 +1689,16 @@ def service_contract_priority(row: dict[str, Any]) -> int:
     return score
 
 
-def fetch_executive_status(corp_code: str, config: AppConfig, *, years: int) -> list[dict[str, Any]]:
+def fetch_executive_status(
+    corp_code: str,
+    config: AppConfig,
+    *,
+    years: int,
+    latest_business_year: int | None = None,
+) -> list[dict[str, Any]]:
     if config.demo:
         return demo_executives()
-    start_year = config.current_year - 1
+    start_year = latest_business_year or config.current_year - 1
     fetch_years = list(range(start_year, start_year - years, -1))
     for year, rows in fetch_yearly_payloads("exctvSttus", corp_code, config, fetch_years):
         normalized = [normalize_executive_row(row, year) for row in rows if is_meaningful_value(row.get("nm", ""))]
@@ -1842,6 +1947,14 @@ def attach_event_schedule(
     )
     analysis["event_schedule"] = schedule
     analysis["next_timeline_event"] = next_timeline_event(schedule, as_of=as_of)
+    analysis["timeline_verification"] = next(
+        (
+            item
+            for item in schedule
+            if item.get("date_status") == "source_verification_required"
+        ),
+        {},
+    )
 
 
 def build_audit_applicability(
@@ -1861,15 +1974,7 @@ def build_audit_applicability(
     corp_label = CORP_CLASS_LABELS.get(corp_cls, "알 수 없음")
     is_listed = corp_cls in LISTED_CORP_CLASSES
     subject = analysis.get("periodic_subject_estimate") or {}
-    fiscal_end_month = resolve_fiscal_end_month(corp, company_profile)
-    latest_year = int_or_zero(analysis.get("latest_business_year"))
-    next_fiscal_year = latest_year + 1 if latest_year else as_of.year
     audit_committee = audit_committee_evidence(executives)
-    appointment_date = appointment_deadline(
-        next_fiscal_year,
-        fiscal_end_month,
-        audit_committee_required=bool(audit_committee),
-    )
     rules: list[dict[str, Any]] = []
 
     if is_listed:
@@ -1912,17 +2017,21 @@ def build_audit_applicability(
         audit_rule_card(
             "appointment_deadline",
             "감사인 선임기한",
-            "likely" if audit_committee else "review",
-            "감사위원회 기준" if audit_committee else "일반 기준·연장 확인",
+            "review",
+            "회사 원문 확인 필요",
             (
-                f"{next_fiscal_year} 사업연도 선임기한은 {appointment_date.isoformat()}로 계산됩니다. "
-                + (
-                    f"{audit_committee} 공개 임원자료에 감사위원회 문구가 있어 사업연도 개시 전일을 검토 경계로 표시했습니다."
+                (
+                    f"{audit_committee} 다만 임원 직무 문자열만으로 감사위원회 설치 여부와 현재 선임기간을 "
+                    "확정할 수 없어 회사별 날짜를 산출하지 않습니다."
                     if audit_committee
-                    else appointment_deadline_note(next_fiscal_year, fiscal_end_month)
+                    else "공개 구조화 데이터만으로 감사위원회 설치 여부와 현재 선임기간을 확정하지 못해 "
+                    "회사별 날짜를 산출하지 않습니다."
                 )
             ),
-            "정관, 지배구조보고서, 감사위원회 설치 의무와 휴일 연장 여부를 확인해 실제 마감일을 확정하세요.",
+            (
+                "감사위원회 설치 회사의 사업연도 개시 전 기준과 그 밖의 회사에 적용될 수 있는 개시 후 45일 기준 중 "
+                "어느 기준이 적용되는지 정관·지배구조보고서·공식 선임공고에서 확인하세요."
+            ),
             ["external_audit_act_10", "fss_2026_appointment"],
         )
     )
@@ -2126,60 +2235,41 @@ def build_three_year_term_event(
     auditor = str(current_run.get("auditor", "")).strip()
     if not start_year or not end_year:
         return None
+    return audit_timeline_verification(
+        auditor=auditor,
+        start_year=start_year,
+        end_year=end_year,
+    )
 
-    years_into_run = max(0, end_year - start_year)
-    block_start = start_year + (years_into_run // THREE_YEAR_APPOINTMENT_TERM) * THREE_YEAR_APPOINTMENT_TERM
-    block_end = block_start + THREE_YEAR_APPOINTMENT_TERM - 1
-    review_fiscal_year = block_end + 1
-    event_date = appointment_deadline(
-        review_fiscal_year,
-        fiscal_end_month,
-        audit_committee_required=audit_committee_required,
-    )
-    rolled_blocks = 0
-    while event_date <= as_of:
-        block_start += THREE_YEAR_APPOINTMENT_TERM
-        block_end += THREE_YEAR_APPOINTMENT_TERM
-        review_fiscal_year += THREE_YEAR_APPOINTMENT_TERM
-        event_date = appointment_deadline(
-            review_fiscal_year,
-            fiscal_end_month,
-            audit_committee_required=audit_committee_required,
-        )
-        rolled_blocks += 1
-    days_remaining = (event_date - as_of).days
-    deadline_basis = (
-        "공개 임원자료에서 감사위원회 문구가 확인되어 사업연도 개시 전일을 검토 경계로 적용했습니다."
-        if audit_committee_required
-        else appointment_deadline_note(review_fiscal_year, fiscal_end_month)
-    )
-    history_limit = (
-        f"최신 완료 사업연도 공개이력은 {end_year}년까지입니다. "
-        + (
-            f"그 이후 {rolled_blocks}개 3년 구간에도 동일 감사인이 재선임된다는 계산상 가정이 포함됩니다. "
-            if rolled_blocks
-            else ""
-        )
-        + "실제 선임·교체·지정 결과는 감사인 선임보고와 금감원 통지 원문에서 확인해야 합니다."
-    )
-    return audit_timeline_event(
-        kind="three_year_term",
-        title="3개 사업연도 동일 감사인 계약 검토",
-        event_date=event_date,
-        fiscal_year=review_fiscal_year,
-        days_remaining=days_remaining,
-        detail=(
-            f"{auditor or '현재 감사인'} 기준 {block_start}~{block_end} 사업연도 3년 구간 이후 "
-            f"재선임, 교체, 지정 여부를 확인해야 합니다. {history_limit}"
+
+def audit_timeline_verification(
+    *,
+    auditor: str,
+    start_year: int,
+    end_year: int,
+) -> dict[str, Any]:
+    return {
+        "kind": "appointment_source_verification",
+        "title": "현재 선임기간 원문 확인",
+        "event_date": "",
+        "fiscal_year": "",
+        "days_remaining": None,
+        "dday_label": "원문 확인 필요",
+        "urgency": "review",
+        "detail": (
+            f"OpenDART에서 {auditor or '최근 공시 감사인'}이 {start_year}~{end_year} 사업연도에 연속 표시됩니다. "
+            "그러나 같은 감사인명이 이어진 사실만으로 동일한 3년 선임계약, 자유선임·지정 여부, 현재 계약의 "
+            "시작·종료연도를 확정할 수 없습니다. 공식 선임공고에서 기간을 확인하기 전에는 날짜나 D-day를 계산하지 않습니다."
         ),
-        basis=(
-            "주권상장법인 등은 연속 3개 사업연도 동일 감사인 선임 의무가 있습니다. "
-            + deadline_basis
+        "basis": (
+            "주권상장법인 등의 3개 사업연도 동일 감사인 선임 기준은 일반 법정 기준이지만, "
+            "개별 회사의 현재 선임기간은 감사인 이력만으로 확정할 수 없습니다."
         ),
-        confidence="medium",
-        source_ids=["external_audit_act_10", "fss_2026_appointment"],
-        priority_order=20,
-    )
+        "confidence": "low",
+        "date_status": "source_verification_required",
+        "sources": source_refs(["external_audit_act_10", "fss_2026_appointment"]),
+        "priority_order": 20,
+    }
 
 
 def audit_timeline_event(
@@ -2206,6 +2296,7 @@ def audit_timeline_event(
         "detail": detail,
         "basis": basis,
         "confidence": confidence,
+        "date_status": "calculated_candidate",
         "sources": source_refs(source_ids),
         "priority_order": priority_order,
     }
@@ -2234,6 +2325,15 @@ def resolve_fiscal_end_month(corp: dict[str, str], company_profile: dict[str, An
         if 1 <= month <= 12:
             return month
     return 12
+
+
+def latest_completed_business_year(as_of: date, fiscal_end_month: int) -> int:
+    """Return the calendar year in which the latest fiscal year has ended."""
+    month = fiscal_end_month if 1 <= fiscal_end_month <= 12 else 12
+    fiscal_end_day = calendar.monthrange(as_of.year, month)[1]
+    if (as_of.month, as_of.day) >= (month, fiscal_end_day):
+        return as_of.year
+    return as_of.year - 1
 
 
 def fiscal_year_start(fiscal_year: int, fiscal_end_month: int) -> date:
@@ -3160,6 +3260,7 @@ def recommendation_summary(report: dict[str, Any]) -> dict[str, Any]:
         "latest_business_year": analysis.get("latest_business_year"),
         "consecutive_years": analysis.get("consecutive_years"),
         "next_timeline_event": next_timeline_event_payload,
+        "timeline_verification": analysis.get("timeline_verification") or {},
         "event_schedule": (analysis.get("event_schedule") or [])[:3],
         "segment": segment.get("label", ""),
         "sales_case": sales_case.get("label", ""),
@@ -3226,8 +3327,10 @@ def build_demo_report() -> dict[str, Any]:
         [],
         years=len(history),
         current_year=today_kst().year,
+        latest_business_year=today_kst().year - 1,
         external_error=None,
     )
+    attach_coverage_status(analysis, coverage)
     sales_strategy = build_sales_strategy(corp, analysis, coverage, [], {})
     firm_persona = get_firm_persona()
     lead_recommendation = build_lead_recommendation(
@@ -3446,6 +3549,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
     company = payload["company"]
     analysis = payload["analysis"]
     next_event = analysis.get("next_timeline_event", {})
+    primary_event = next_event or analysis.get("timeline_verification", {})
     lines = [
         "# 감사인 교체 시기 조회",
         "",
@@ -3466,11 +3570,11 @@ def render_markdown(payload: dict[str, Any]) -> str:
                 f"- 최신 사업연도: **{analysis['latest_business_year']}**",
                 f"- 동일 감사인 연속연차: **{analysis['consecutive_years']}년**",
                 f"- 법인구분: **{analysis['corp_class_label']}**",
-                f"- 관련 기준: **{next_event.get('title', '-')}**",
-                f"- 교체/검토 시기: **{next_event.get('event_date', '-')}**",
-                f"- 기준일 대비: **{next_event.get('dday_label', '-')}**",
-                f"- 기준 근거: {next_event.get('basis', '')}",
-                f"- 기준 출처: {source_labels(next_event.get('sources', [])) or '-'}",
+                f"- 관련 기준: **{primary_event.get('title', '-')}**",
+                f"- 교체/검토 시기: **{primary_event.get('event_date') or primary_event.get('dday_label', '-')}**",
+                f"- 기준일 대비: **{next_event.get('dday_label', 'D-day 미산출')}**",
+                f"- 기준 근거: {primary_event.get('basis', '')}",
+                f"- 기준 출처: {source_labels(primary_event.get('sources', [])) or '-'}",
             ]
         )
 
@@ -3985,6 +4089,8 @@ INDEX_HTML = r"""<!doctype html>
     .report-meta { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 14px; }
     .report-meta span { display: block; color: var(--muted); font-size: 12px; }
     .report-meta strong { display: block; font-size: 18px; margin-top: 2px; }
+    .data-quality { border: 1px solid #f0c36d; border-left: 4px solid #ca8a04; border-radius: 6px; background: #fffbeb; color: #6b4f12; padding: 10px 12px; margin: -2px 0 14px; line-height: 1.45; }
+    .data-quality.ok { border-color: #b9d5ff; border-left-color: var(--brand); background: #f8fbff; color: #29425f; }
     .badge { border: 1px solid #b9d5ff; border-radius: 999px; padding: 6px 10px; font-size: 12px; font-weight: 700; color: var(--brand-dark); background: var(--brand-soft); white-space: nowrap; }
     .badge.demo { color: #0e7490; background: var(--accent-soft); border-color: #a5e3ee; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -4111,13 +4217,16 @@ INDEX_HTML = r"""<!doctype html>
       }
       const company = data.company || {};
       const next = a.next_timeline_event || {};
+      const verification = a.timeline_verification || {};
+      const primary = Object.keys(next).length ? next : verification;
       $("report").innerHTML = `
         ${meta}
+        <div class="data-quality ${a.data_quality_status === "latest_year_observed" ? "ok" : ""}">${esc(a.data_quality_message || "공시 커버리지 확인 필요")}</div>
         <div class="summary">
           <div class="metric"><span>대상 회사</span><strong>${esc(company.corp_name || "-")}</strong></div>
-          <div class="metric"><span>최근 공시 감사인</span><strong>${esc(a.current_auditor || "-")}</strong></div>
-          <div class="metric"><span>교체/검토 시기</span><strong>${esc(next.event_date || "-")}</strong></div>
-          <div class="metric"><span>기준일 대비</span><strong>${esc(next.dday_label || "-")}</strong></div>
+          <div class="metric"><span>최근 완료연도 확인 감사인</span><strong>${esc(a.current_auditor || "-")}</strong></div>
+          <div class="metric"><span>교체/검토 시기</span><strong>${esc(primary.event_date || primary.dday_label || "원문 확인 필요")}</strong></div>
+          <div class="metric"><span>기준일 대비</span><strong>${esc(next.dday_label || "D-day 미산출")}</strong></div>
         </div>
         ${renderPrimaryDecision(data)}
         ${renderAuditTimeline(a)}
@@ -4136,13 +4245,15 @@ INDEX_HTML = r"""<!doctype html>
       const analysis = data.analysis || {};
       const company = data.company || {};
       const next = analysis.next_timeline_event || {};
+      const verification = analysis.timeline_verification || {};
+      const primary = Object.keys(next).length ? next : verification;
       return `<div class="decision">
         <h3>교체/검토 기준</h3>
         <div class="decision-grid">
           <div class="decision-block"><span>대상 회사</span><strong>${esc(company.corp_name || "-")}</strong><p>${esc(company.stock_code || "-")} · ${esc(analysis.corp_class_label || "-")}</p></div>
-          <div class="decision-block"><span>감사인</span><strong>${esc(analysis.current_auditor || "-")}</strong><p>${esc(analysis.latest_business_year || "-")} 사업연도 기준 · 연속 ${esc(analysis.consecutive_years || "-")}년</p></div>
-          <div class="decision-block"><span>관련 기준</span><strong>${esc(next.title || "-")}</strong><p>${esc(next.basis || "")}</p>${renderSources(next.sources || [])}</div>
-          <div class="decision-block"><span>시기</span><strong>${esc(next.event_date || "-")} · ${esc(next.dday_label || "-")}</strong><p>${esc(next.detail || "")}</p></div>
+          <div class="decision-block"><span>최근 완료연도 확인 감사인</span><strong>${esc(analysis.current_auditor || "-")}</strong><p>${esc(analysis.latest_business_year || "-")} 사업연도 기준 · 공시에서 확인된 동일 감사인 연속 이력 ${esc(analysis.consecutive_years || "-")}년</p></div>
+          <div class="decision-block"><span>관련 기준</span><strong>${esc(primary.title || "-")}</strong><p>${esc(primary.basis || "")}</p>${renderSources(primary.sources || [])}</div>
+          <div class="decision-block"><span>시기</span><strong>${esc(primary.event_date || primary.dday_label || "원문 확인 필요")} · ${esc(next.dday_label || "D-day 미산출")}</strong><p>${esc(primary.detail || "")}</p></div>
         </div>
       </div>`;
     }
@@ -4155,9 +4266,9 @@ INDEX_HTML = r"""<!doctype html>
         <div class="timeline-list">
           ${rows.map(row => `<div class="timeline-item ${esc(row.urgency || "normal")}">
             <div class="timeline-date">
-              <span>${esc(row.event_date || "-")}</span>
+              <span>${esc(row.event_date || "날짜 미산출")}</span>
               <strong>${esc(row.dday_label || "-")}</strong>
-              <span>${esc(row.fiscal_year || "-")} 사업연도</span>
+              ${row.fiscal_year ? `<span>${esc(row.fiscal_year)} 사업연도</span>` : ""}
             </div>
             <div class="timeline-body">
               <strong>${esc(row.order || "")}. ${esc(row.title || "-")}</strong>
@@ -4178,8 +4289,9 @@ INDEX_HTML = r"""<!doctype html>
     function renderCoverage(data) {
       const c = data.coverage || {};
       if (!Object.keys(c).length) return "";
-      const missing = (c.missing_recent_years || []).length
-        ? `<p><strong>최근 공시 미확인 연도:</strong> ${esc(c.missing_recent_years.join(", "))}</p>`
+      const missingYears = c.missing_requested_years || c.missing_recent_years || [];
+      const missing = missingYears.length
+        ? `<p><strong>요청 범위 중 공시 미확인 연도:</strong> ${esc(missingYears.join(", "))}</p>`
         : "";
       const annualGaps = (c.annual_report_gap_years || []).length
         ? `<p><strong>사업보고서 확인·감사인 항목 미확인 연도:</strong> ${esc(c.annual_report_gap_years.join(", "))}</p>`
@@ -4305,8 +4417,9 @@ def run_core_regression_checks() -> None:
         audit_committee_required=True,
     )
     assert term_event is not None
-    assert term_event["event_date"] == "2028-12-31"
-    assert "최신 완료 사업연도 공개이력은 2025년까지" in term_event["detail"]
+    assert term_event["event_date"] == ""
+    assert term_event["dday_label"] == "원문 확인 필요"
+    assert "2023~2025 사업연도에 연속 표시" in term_event["detail"]
 
     schedule = [
         {"event_date": "2026-07-22", "title": "과거"},
