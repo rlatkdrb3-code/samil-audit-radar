@@ -3859,7 +3859,10 @@ def make_handler(config: AppConfig) -> type[BaseHTTPRequestHandler]:
             self.send_response(200)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(data)))
-            self.send_header("Cache-Control", "public, max-age=3600")
+            cache_control = (
+                "no-cache" if content_type.startswith("text/html") else "public, max-age=3600"
+            )
+            self.send_header("Cache-Control", cache_control)
             self.end_headers()
             self.wfile.write(data)
 
