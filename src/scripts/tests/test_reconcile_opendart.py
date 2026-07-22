@@ -117,6 +117,8 @@ class ReconcileUniverseTests(unittest.TestCase):
         self.assertEqual(reconcile.parse_hours("39.012"), 39012)
         self.assertEqual(reconcile.parse_hours("40,370"), 40370)
         self.assertEqual(reconcile.parse_hours("1,200.00"), 1200)
+        self.assertIsNone(reconcile.parse_hours("(*1)"))
+        self.assertIsNone(reconcile.parse_hours("7일"))
 
     def test_money_honors_table_unit_and_korean_thousands_separators(self):
         self.assertEqual(reconcile.parse_money("65.000", "천원"), (65_000_000, None))
@@ -127,6 +129,35 @@ class ReconcileUniverseTests(unittest.TestCase):
         self.assertEqual(
             reconcile.parse_money("RMB 1,400,000", ""),
             (None, "foreign_currency_fee"),
+        )
+        self.assertEqual(reconcile.parse_money("- 주1)", "백만원"), (None, None))
+        self.assertEqual(reconcile.parse_money("114 주2)", ""), (114_000_000, None))
+        self.assertEqual(reconcile.parse_money("1.57억", ""), (157_000_000, None))
+        self.assertEqual(reconcile.parse_money("2 0,000천원", ""), (20_000_000, None))
+        self.assertEqual(
+            reconcile.parse_money("25,000", "백만원"),
+            (25_000_000, "inconsistent_million_unit"),
+        )
+        self.assertEqual(
+            reconcile.parse_money("2.2", "CNY"),
+            (None, "foreign_currency_fee"),
+        )
+
+    def test_foreign_issuers_require_currency_verification(self):
+        self.assertTrue(
+            reconcile.requires_currency_verification(
+                {"stock_code": "900290", "corp_name": "GRT"}
+            )
+        )
+        self.assertTrue(
+            reconcile.requires_currency_verification(
+                {"stock_code": "", "corp_name": "CUCKOO INTERNATIONAL BERHAD"}
+            )
+        )
+        self.assertFalse(
+            reconcile.requires_currency_verification(
+                {"stock_code": "005930", "corp_name": "삼성전자"}
+            )
         )
 
     def test_structured_audit_rows_choose_current_term_and_parse_units(self):
@@ -259,6 +290,28 @@ class ReconcileUniverseTests(unittest.TestCase):
 
         self.assertIsNone(reconcile.parse_audit_service_table(document))
         self.assertEqual(reconcile.parse_auditor_from_opinion_table(document), "")
+
+    def test_document_foreign_currency_fee_is_detected_for_global_auditor(self):
+        document = """
+        <P>(단위 : CNY, 시간)</P>
+        <TABLE><THEAD><TR><TH>사업연도</TH><TH>감사인</TH><TH>감사계약내역</TH><TH>보수</TH><TH>시간</TH><TH>실제수행내역</TH></TR></THEAD><TBODY>
+        <TR><TD>제7기(당기)</TD><TD>KPMG MALAYSIA</TD><TD>감사</TD><TD>2.2</TD><TD>1,000</TD><TD>2.2</TD><TD>900</TD></TR>
+        </TBODY></TABLE>
+        <TABLE><THEAD><TR><TH>사업연도</TH><TH>감사인</TH><TH>감사의견</TH></TR></THEAD><TBODY>
+        <TR><TD>제7기(당기)</TD><TD>KPMG MALAYSIA</TD><TD>적정</TD></TR>
+        </TBODY></TABLE>
+        """
+
+        parsed = reconcile.parse_audit_service_table(document)
+
+        self.assertEqual(parsed["auditor"], "KPMG MALAYSIA")
+        self.assertEqual(parsed["fee_unit"], "CNY")
+        self.assertIsNone(parsed["contract_fee"])
+        self.assertIn("foreign_currency_fee", parsed["warnings"])
+        self.assertEqual(
+            reconcile.parse_auditor_from_opinion_table(document),
+            "KPMG MALAYSIA",
+        )
 
     def test_document_service_table_alone_does_not_confirm_auditor(self):
         document = """

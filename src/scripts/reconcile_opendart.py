@@ -62,13 +62,15 @@ UNIT_MULTIPLIERS = {
     "백만원": 1_000_000,
     "천만원": 10_000_000,
     "억원": 100_000_000,
+    "억": 100_000_000,
     "만원": 10_000,
     "천원": 1_000,
     "원": 1,
 }
 UNIT_ORDER = tuple(UNIT_MULTIPLIERS)
 FOREIGN_CURRENCY_RE = re.compile(
-    r"\b(?:USD|CNY|CNH|RMB|JPY|EUR|HKD|SGD|GBP)\b|(?:인민폐|위안)",
+    r"\b(?:USD|CNY|CNH|RMB|JPY|EUR|HKD|SGD|GBP|MYR|AUD|CAD|CHF|"
+    r"TWD|THB|IDR|VND|PHP|INR|AED|NZD)\b|(?:인민폐|위안)",
     re.I,
 )
 FISCAL_YEAR_RE_TEMPLATE = r"사업보고서\s*\(\s*{year}\.(?:0?[1-9]|1[0-2])\s*\)"
@@ -287,8 +289,19 @@ def merge_universe(
 def context_unit(raw: str) -> str:
     context = clean_text(raw)
     found: list[str] = []
-    for match in re.finditer(r"단위\s*[:：]?\s*([^)]{0,80})", context):
+    for match in re.finditer(
+        r"(?:단위|UNIT)\s*[:：]?\s*([^)]{0,80})",
+        context,
+        flags=re.I,
+    ):
         segment = match.group(1)
+        if re.search(r"\bKRW\b|원화", segment, flags=re.I):
+            found.append("원")
+            continue
+        foreign = FOREIGN_CURRENCY_RE.search(segment)
+        if foreign:
+            found.append(foreign.group(0))
+            continue
         for unit in UNIT_ORDER:
             if unit in segment:
                 found.append(unit)
@@ -296,33 +309,49 @@ def context_unit(raw: str) -> str:
     return found[-1] if found else ""
 
 
-def parse_money(cell: str, unit: str) -> tuple[float | None, str | None]:
-    if FOREIGN_CURRENCY_RE.search(cell):
-        return None, "foreign_currency_fee"
-    match = re.search(r"(?<![\d.,])(\d[\d,.]*\d|\d)(?![\d.,])", cell)
+def clean_numeric_cell(cell: str) -> str:
+    text = re.sub(r"\(\s*\*\s*\d+\s*\)", " ", str(cell or ""))
+    text = re.sub(r"\(\s*주\s*\d+\s*\)|주\s*\d+\s*\)?", " ", text)
+    text = re.sub(r"(?<=\d)\s+(?=[\d,.])", "", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def parse_localized_number(value: str) -> tuple[float, re.Match[str]] | None:
+    match = re.search(r"(?<![\d.,])(\d[\d,.]*\d|\d)(?![\d.,])", value)
     if not match:
-        return None, None
+        return None
     token = match.group(1)
     if re.fullmatch(r"\d{1,3}(?:\.\d{3})+", token):
-        raw = float(token.replace(".", ""))
-    else:
-        try:
-            raw = float(token.replace(",", ""))
-        except ValueError:
-            return None, None
-    tail = cell[match.end() : match.end() + 20].replace(" ", "")
+        return float(token.replace(".", "")), match
+    try:
+        return float(token.replace(",", "")), match
+    except ValueError:
+        return None
+
+
+def parse_money(cell: str, unit: str) -> tuple[float | None, str | None]:
+    cleaned = clean_numeric_cell(cell)
+    if FOREIGN_CURRENCY_RE.search(f"{unit} {cleaned}"):
+        return None, "foreign_currency_fee"
+    parsed = parse_localized_number(cleaned)
+    if not parsed:
+        return None, None
+    raw, match = parsed
+    tail = cleaned[match.end() : match.end() + 20].replace(" ", "")
     explicit = next((candidate for candidate in UNIT_ORDER if tail.startswith(candidate)), None)
     if explicit:
         return raw * UNIT_MULTIPLIERS[explicit], None
 
-    # The table-level unit is part of the source disclosure and takes priority
-    # over magnitude heuristics.  For example, 1,197,000 in a '천원' table is
-    # KRW 1,197,000,000, not KRW 1,197,000.
+    # Some filings label a table as 백만원 but put large cells in 천원-style
+    # notation (for example 25,000 for KRW 25m). Preserve the established
+    # magnitude fallback only for that inconsistent combination.
+    if unit == "백만원" and raw >= 10_000:
+        return raw * 1_000, "inconsistent_million_unit"
     if unit:
         return raw * UNIT_MULTIPLIERS[unit], None
 
-    # Some reports carry stale or malformed unit metadata. These magnitude
-    # guards match the common DART representations: won, thousand won, million won.
+    # When the table-level unit is unavailable, use the common DART
+    # representations: won, thousand won, or million won.
     if raw >= 1_000_000:
         return raw, None
     if raw >= 10_000:
@@ -331,19 +360,21 @@ def parse_money(cell: str, unit: str) -> tuple[float | None, str | None]:
 
 
 def parse_hours(cell: str) -> int | None:
-    match = re.search(r"(?<!\d)(\d[\d,.]*)", cell)
-    if not match:
+    cleaned = clean_numeric_cell(cell)
+    explicit_hours = re.search(
+        r"(?<![\d.,])(\d[\d,.]*\d|\d)\s*(?:시간|hours?|hrs?)\b",
+        cleaned,
+        flags=re.I,
+    )
+    if explicit_hours:
+        cleaned = explicit_hours.group(1)
+    elif re.search(r"\d\s*(?:일|days?)\b", cleaned, flags=re.I):
         return None
-    value = match.group(1).rstrip(".,")
-    if "," in value:
-        normalized = value.replace(",", "")
-        if re.fullmatch(r"\d+(?:\.\d+)?", normalized):
-            return round(float(normalized))
-    if re.fullmatch(r"\d{1,3}(?:\.\d{3})+", value):
-        return int(re.sub(r"[,.]", "", value))
-    if re.fullmatch(r"\d+(?:\.\d+)?", value):
-        return round(float(value))
-    return int(value.replace(",", ""))
+    parsed = parse_localized_number(cleaned)
+    if not parsed:
+        return None
+    number, _ = parsed
+    return round(number)
 
 
 def table_cells(row_html: str) -> list[str]:
@@ -416,6 +447,20 @@ def auditor_identity(value: str) -> str:
     return re.sub(r"[^0-9a-z가-힣]", "", cleaned)
 
 
+def valid_auditor_name(value: str) -> bool:
+    cleaned = clean_text(value).strip()
+    if not cleaned or cleaned in {"-", "해당사항 없음", "해당없음"} or len(cleaned) > 120:
+        return False
+    return bool(
+        re.search(
+            r"(?:회계법인|감사반|KPMG|PWC|PRICEWATERHOUSE|DELOITTE|"
+            r"ERNST|YOUNG|BDO|ACCOUNTANTS?|AUDIT|\bLLP\b|\bCPA\b)",
+            cleaned,
+            flags=re.I,
+        )
+    )
+
+
 def primary_table_columns(header: str) -> tuple[int, int] | None:
     for header_row in re.findall(r"<TR\b.*?</TR>", header, flags=re.I | re.S):
         cells = table_cells(header_row)
@@ -459,7 +504,7 @@ def parse_audit_service_table(raw: str) -> dict[str, Any] | None:
             if max(period_index, auditor_index) >= len(cells):
                 continue
             auditor = cells[auditor_index].strip()
-            if len(re.findall(r"(?:회계법인|감사반)", auditor)) != 1:
+            if not valid_auditor_name(auditor):
                 continue
             period_label = cells[period_index].strip()
             if is_prior_relative_period(period_label):
@@ -483,6 +528,7 @@ def parse_audit_service_table(raw: str) -> dict[str, Any] | None:
                         "auditor": auditor,
                         "period_label": period_label,
                         "period_key": period_key,
+                        "fee_unit": unit,
                         "contract_fee": contract_fee,
                         "actual_fee": actual_fee,
                         "contract_hours": contract_hours,
@@ -528,7 +574,7 @@ def parse_auditor_evidence_from_opinion_table(raw: str) -> dict[str, str] | None
             if max(period_index, auditor_index) >= len(cells):
                 continue
             auditor = cells[auditor_index].strip()
-            if len(re.findall(r"(?:회계법인|감사반)", auditor)) != 1:
+            if not valid_auditor_name(auditor):
                 continue
             period_label = cells[period_index].strip()
             if is_prior_relative_period(period_label):
@@ -568,10 +614,28 @@ def parse_auditor_from_opinion_table(raw: str) -> str:
     return evidence["auditor"] if evidence else ""
 
 
+def requires_currency_verification(row: dict[str, str]) -> bool:
+    stock_code = re.sub(r"\D", "", row.get("stock_code", ""))
+    if len(stock_code) == 6 and stock_code.startswith("9"):
+        return True
+    name = str(row.get("corp_name") or "").upper()
+    return bool(
+        re.search(
+            r"(?:\bINC\.?\b|\bLTD\.?\b|\bLIMITED\b|\bBERHAD\b|\bPLC\b|"
+            r"\bCORPORATION\b)",
+            name,
+        )
+    )
+
+
 def document_needs_reconciliation(row: dict[str, str], receipt_changed: bool) -> bool:
     contract = parse_number(row.get("audit_contract_fee"))
     actual = parse_number(row.get("audit_actual_fee"))
-    if receipt_changed or not row.get("auditor_raw", "").strip():
+    if (
+        receipt_changed
+        or not row.get("auditor_raw", "").strip()
+        or requires_currency_verification(row)
+    ):
         return True
     if contract is None or actual is None or contract < 0 or actual < 0 or actual == 0:
         return True
@@ -998,22 +1062,48 @@ def main() -> int:
                 row["auditor_raw"] = str(result["auditor"])
                 row["auditor_group"] = normalize_auditor(row["auditor_raw"])
                 row["auditor_source"] = "document.xml"
-            replacements = (
-                ("audit_contract_fee", "contract_fee"),
-                ("audit_actual_fee", "actual_fee"),
-                ("audit_contract_hours", "contract_hours"),
-                ("audit_actual_hours", "actual_hours"),
+            result_warnings = list(result.get("warnings", []))
+            currency_unverified = requires_currency_verification(row) and (
+                result.get("fee_unit") not in UNIT_MULTIPLIERS
             )
-            replaced_fee = False
-            for target, source in replacements:
-                if result.get(source) is not None:
-                    row[target] = format_number(result[source])
-                    replaced_fee = True
-            if replaced_fee:
-                row["fee_source"] = "document.xml"
-            for warning in result.get("warnings", []):
+            if "foreign_currency_fee" in result_warnings or currency_unverified:
+                for field in (
+                    "audit_contract_fee",
+                    "audit_actual_fee",
+                    "audit_contract_hours",
+                    "audit_actual_hours",
+                ):
+                    row[field] = ""
+                row["fee_source"] = "foreign_currency_excluded"
+                if currency_unverified and "foreign_currency_fee" not in result_warnings:
+                    result_warnings.append("fee_currency_unverified")
+            else:
+                replacements = (
+                    ("audit_contract_fee", "contract_fee"),
+                    ("audit_actual_fee", "actual_fee"),
+                    ("audit_contract_hours", "contract_hours"),
+                    ("audit_actual_hours", "actual_hours"),
+                )
+                replaced_fee = False
+                for target, source in replacements:
+                    if result.get(source) is not None:
+                        row[target] = format_number(result[source])
+                        replaced_fee = True
+                if replaced_fee:
+                    row["fee_source"] = "document.xml"
+            for warning in result_warnings:
                 append_warning(row, warning)
         else:
+            if requires_currency_verification(row):
+                for field in (
+                    "audit_contract_fee",
+                    "audit_actual_fee",
+                    "audit_contract_hours",
+                    "audit_actual_hours",
+                ):
+                    row[field] = ""
+                row["fee_source"] = "foreign_currency_excluded"
+                append_warning(row, "fee_currency_unverified")
             append_warning(row, error or "document_fallback_failed")
 
     if not args.skip_revenue:
