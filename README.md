@@ -1,6 +1,6 @@
-# Audit Appointment Radar
+# Audit Market Intelligence
 
-AX 해커톤 예선 제출용 Codex 플러그인 및 웹서비스입니다.
+감사인 교체·선임 레이더와 감사시장 점유율 분석을 결합한 Codex 플러그인 및 웹서비스입니다.
 
 공개 데모: https://samil-audit-radar.onrender.com
 
@@ -21,6 +21,9 @@ AX 해커톤 예선 제출용 Codex 플러그인 및 웹서비스입니다.
 - 임원 현황과 감사위원회 관련 가능 신호 표시
 - OpenDART 외부감사관련 공시 기준 입찰/제안요청/선임 공고 확인
 - 확인된 공고의 원문 URL 제공
+- 2023~2024 회계법인별 피감회사 수 기준 시장점유율 비교
+- 감사계약 보수·실제수행 보수·피감사회사 매출 기준 보조 분석
+- 연도별 추이, 선택 연도 구성, CSV 업로드와 JSON 내보내기 대시보드
 
 ## 제외 범위
 
@@ -39,7 +42,10 @@ samil-audit-radar/
 ├── src/
 │   ├── .codex-plugin/plugin.json
 │   ├── skills/audit-radar/SKILL.md
+│   ├── skills/audit-market-share/SKILL.md
 │   ├── scripts/audit_radar.py
+│   ├── scripts/reconcile_opendart.py
+│   ├── web/market_share.html
 │   ├── examples/
 │   └── references/
 ├── README.md
@@ -77,6 +83,8 @@ python3 scripts/audit_radar.py report 삼성전자 --years 10 --output audit-rad
 python3 scripts/audit_radar.py serve --port 8765
 ```
 
+실행 후 감사인 교체 레이더는 `/`, 감사시장 점유율 대시보드는 `/market-share`에서 확인합니다. 점유율 화면의 기본 CSV는 같은 서버의 `/data/audit-market-share.csv`에서 제공합니다.
+
 API 키 없이 화면과 로직을 확인:
 
 ```bash
@@ -88,6 +96,7 @@ python3 scripts/audit_radar.py demo
 현재 Render에 배포되어 있습니다.
 
 - Public URL: https://samil-audit-radar.onrender.com
+- Market share dashboard (v0.2.0 배포 후): https://samil-audit-radar.onrender.com/market-share
 - Health check: https://samil-audit-radar.onrender.com/healthz
 
 API 키가 브라우저에 노출되지 않도록 Python 서버가 `DART_API_KEY`를 서버 환경변수로 읽습니다. 정적 호스팅만 제공하는 플랫폼보다 Render, Railway, Fly.io, Cloud Run 같은 서버 실행형 플랫폼에 배포하는 방식을 권장합니다.

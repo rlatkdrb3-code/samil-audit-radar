@@ -41,6 +41,8 @@ RATE_LIMIT_MAX_REQUESTS = 30
 RESPONSE_CACHE_TTL_SECONDS = 60 * 60
 ROOT = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = ROOT.parent
+MARKET_SHARE_HTML = ROOT / "web" / "market_share.html"
+MARKET_SHARE_CSV = ROOT / "examples" / "audit_market_2023_2024_annual_report_all.csv"
 CACHE_DIR = PROJECT_ROOT / ".cache"
 CORP_CACHE = CACHE_DIR / "corp_codes.json"
 ENV_FILES = (PROJECT_ROOT / ".env.local", PROJECT_ROOT / ".env")
@@ -3732,6 +3734,12 @@ def make_handler(config: AppConfig) -> type[BaseHTTPRequestHandler]:
                 if parsed.path == "/":
                     self.respond_html(INDEX_HTML)
                     return
+                if parsed.path in {"/market-share", "/market-share/"}:
+                    self.respond_file(MARKET_SHARE_HTML, "text/html; charset=utf-8")
+                    return
+                if parsed.path == "/data/audit-market-share.csv":
+                    self.respond_file(MARKET_SHARE_CSV, "text/csv; charset=utf-8")
+                    return
                 if parsed.path.startswith("/api/") and not allow_request(client_ip(self)):
                     self.respond_json(
                         {
@@ -3839,6 +3847,18 @@ def make_handler(config: AppConfig) -> type[BaseHTTPRequestHandler]:
             self.end_headers()
             self.wfile.write(data)
 
+        def respond_file(self, path: Path, content_type: str) -> None:
+            if not path.is_file():
+                self.send_error(HTTPStatus.NOT_FOUND, "Not found")
+                return
+            data = path.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "public, max-age=3600")
+            self.end_headers()
+            self.wfile.write(data)
+
     return Handler
 
 
@@ -3903,11 +3923,14 @@ INDEX_HTML = r"""<!doctype html>
     }
     * { box-sizing: border-box; }
     body { margin: 0; background: var(--bg); color: var(--ink); }
-    header { background: #0f3f88; color: #fff; border-bottom: 1px solid #0b3474; padding: 20px 28px; }
+    header { display: flex; justify-content: space-between; gap: 20px; align-items: center; background: #0f3f88; color: #fff; border-bottom: 1px solid #0b3474; padding: 20px 28px; }
     main { max-width: 1200px; margin: 0 auto; padding: 24px; }
     h1 { margin: 0; font-size: 24px; letter-spacing: 0; }
     h2 { font-size: 16px; margin: 0 0 12px; }
     .subtitle { margin-top: 5px; color: #bfdbfe; font-size: 13px; }
+    .site-nav { display: flex; flex-wrap: wrap; gap: 8px; }
+    .site-nav a { border: 1px solid rgba(255,255,255,.38); border-radius: 6px; padding: 9px 12px; color: #dbeafe; font-size: 13px; }
+    .site-nav a:hover, .site-nav a.active { background: #fff; color: #0f3f88; }
     .toolbar { display: grid; grid-template-columns: 1fr 116px 92px; gap: 10px; margin: 0; }
     input, select, button { font: inherit; height: 44px; border: 1px solid var(--line); border-radius: 6px; padding: 0 12px; background: #fff; color: var(--ink); }
     input:focus, select:focus { outline: 2px solid rgba(37, 99, 235, 0.22); border-color: var(--brand); }
@@ -3997,6 +4020,7 @@ INDEX_HTML = r"""<!doctype html>
     ul { margin: 8px 0 0 18px; padding: 0; }
     li { margin: 5px 0; }
     @media (max-width: 860px) {
+      header { align-items: flex-start; flex-direction: column; }
       .toolbar, .result-strip, .summary, .coverage-grid, .strategy-grid, .recommendation-score, .driver-grid, .decision-grid { grid-template-columns: 1fr; }
       .result-label { line-height: 1.2; }
       .company { width: 100%; max-width: none; }
@@ -4007,8 +4031,14 @@ INDEX_HTML = r"""<!doctype html>
 </head>
 <body>
   <header>
-    <h1>감사인 교체 시기 조회</h1>
-    <div class="subtitle">OpenDART 기반 상장사 감사인·교체 기준·남은 기간</div>
+    <div>
+      <h1>감사인 교체 시기 조회</h1>
+      <div class="subtitle">OpenDART 기반 상장사 감사인·교체 기준·남은 기간</div>
+    </div>
+    <nav class="site-nav" aria-label="서비스 메뉴">
+      <a class="active" href="/">감사인 교체 레이더</a>
+      <a href="/market-share">감사시장 점유율</a>
+    </nav>
   </header>
   <main>
     <section class="panel search-panel">
