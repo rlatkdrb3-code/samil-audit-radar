@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 import tempfile
@@ -315,6 +316,8 @@ def step_updates(args: argparse.Namespace) -> dict[str, Any]:
             updates[field_name] = values
     for field_name in ("frequency_per_month", "minutes_per_case", "manual_ratio_pct"):
         value = updates.get(field_name)
+        if value is not None and not math.isfinite(value):
+            raise SessionError(f"{field_name} must be finite")
         if value is not None and value < 0:
             raise SessionError(f"{field_name} cannot be negative")
     if updates.get("manual_ratio_pct") is not None and updates["manual_ratio_pct"] > 100:
@@ -400,6 +403,11 @@ def bullet_lines(values: list[str] | None, empty: str = "- 없음") -> list[str]
 def render_report(process: dict[str, Any], analysis: dict[str, Any] | None = None) -> str:
     scope = process.get("scope") or {}
     confirmed_label = "예" if process.get("interview_confirmed") else "아니오"
+    provenance_note = (
+        "> 합성 데모 데이터입니다. 실제 회사·임직원·처리량 또는 운영 성과를 나타내지 않습니다."
+        if process.get("synthetic")
+        else "> 이 보고서는 사용자에게 확정받은 업무 흐름을 기준으로 작성했습니다. 미확인과 가정은 확인된 사실이 아닙니다."
+    )
     lines = [
         f"# {process.get('title') or '업무 프로세스'} Process-to-AX 결과 보고서",
         "",
@@ -408,7 +416,7 @@ def render_report(process: dict[str, Any], analysis: dict[str, Any] | None = Non
         f"- 인터뷰 확정: `{confirmed_label}`",
         f"- 보고서 생성: `{now_iso()}`",
         "",
-        "> 이 보고서는 사용자에게 확정받은 업무 흐름을 기준으로 작성했습니다. 미확인과 가정은 확인된 사실이 아닙니다.",
+        provenance_note,
         "",
         "## 1. 확정된 현재 업무",
         "",

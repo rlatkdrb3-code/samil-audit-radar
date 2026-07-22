@@ -2,6 +2,7 @@
   "schema_version": "1.0",
   "session_id": "expense-demo",
   "title": "임직원 경비 정산",
+  "synthetic": true,
   "status": "finalized",
   "stage": "complete",
   "revision": 15,

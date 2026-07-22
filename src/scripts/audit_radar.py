@@ -36,8 +36,6 @@ MAX_YEARS = 12
 MAX_RECOMMENDATIONS = 3
 APPOINTMENT_DEADLINE_DAYS = 45
 THREE_YEAR_APPOINTMENT_TERM = 3
-PERIODIC_APPOINTMENT_YEARS = 6
-GOVERNANCE_DEFERRAL_YEARS = 9
 RATE_LIMIT_WINDOW_SECONDS = 60
 RATE_LIMIT_MAX_REQUESTS = 30
 RESPONSE_CACHE_TTL_SECONDS = 60 * 60
@@ -58,6 +56,7 @@ REQUEST_LOGS: dict[str, list[float]] = {}
 RESPONSE_CACHE: dict[str, tuple[float, Any]] = {}
 SERVER_LOCK = threading.Lock()
 CORP_CACHE_LOCK = threading.Lock()
+KST = timezone(timedelta(hours=9))
 CORP_CLASS_LABELS = {
     "Y": "코스피(유가증권시장)",
     "K": "코스닥",
@@ -74,12 +73,12 @@ AUDIT_RULE_SOURCES = {
     "external_audit_act_10": {
         "label": "외감법 제10조",
         "title": "감사인의 선임",
-        "url": "https://www.law.go.kr/lsLawLinkInfo.do?chrClsCd=010202&lsJoLnkSeq=900643609",
+        "url": "https://www.law.go.kr/LSW/lsLinkCommonInfo.do?chrClsCd=010202&lsJoLnkSeq=1027658295",
     },
     "external_audit_act_11": {
         "label": "외감법 제11조",
         "title": "증권선물위원회에 의한 감사인 지정 등",
-        "url": "https://www.law.go.kr/lsLawLinkInfo.do?chrClsCd=010202&lsJoLnkSeq=900643907",
+        "url": "https://www.law.go.kr/LSW/lsLawLinkInfo.do?chrClsCd=010202&lsJoLnkSeq=1001145102",
     },
     "external_audit_act_13": {
         "label": "외감법 제13조",
@@ -91,14 +90,14 @@ AUDIT_RULE_SOURCES = {
         "title": "감사인 선정 등",
         "url": "https://www.law.go.kr/LSW//lumLsLinkPop.do?chrClsCd=010202&lspttninfSeq=149564",
     },
-    "external_audit_decree_16": {
-        "label": "외감법 시행령 제16조",
-        "title": "감사인 지정의 기준",
-        "url": "https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=271155",
+    "external_audit_decree_15": {
+        "label": "외감법 시행령 제15조",
+        "title": "주권상장법인 등에 대한 감사인 지정",
+        "url": "https://www.law.go.kr/LSW/lsLinkCommonInfo.do?lspttninfSeq=149573",
     },
     "fss_2026_appointment": {
-        "label": "금감원 2026 선임 유의사항",
-        "title": "2026년 외부감사인 선임시 유의사항 안내",
+        "label": "금융감독원 2026 감사인 선임 안내",
+        "title": "금융감독원 「2026년 외부감사인 선임시 유의사항 안내」(정부 정책자료)",
         "url": "https://eiec.kdi.re.kr/policy/materialView.do?num=273968",
     },
     "fsc_accounting_reform": {
@@ -107,6 +106,13 @@ AUDIT_RULE_SOURCES = {
         "url": "https://www.fsc.go.kr/po010105/72558?curPage=5&srchCtgry=5",
     },
 }
+
+
+def today_kst() -> date:
+    """Return the Korean business date regardless of the server's OS timezone."""
+    return datetime.now(KST).date()
+
+
 BIG4_ALIASES = {
     "samil": "삼일",
     "pwc": "삼일",
@@ -336,7 +342,7 @@ def main() -> int:
     args = parser.parse_args()
     config = AppConfig(
         api_key=load_api_key(),
-        current_year=date.today().year,
+        current_year=today_kst().year,
         demo=getattr(args, "demo", False) or args.command == "demo",
         saramin_key=load_saramin_key(),
     )
@@ -541,7 +547,7 @@ def fetch_saramin_job_posts(
     limit: int,
     stock: str,
 ) -> list[dict[str, Any]]:
-    published_min = (date.today() - timedelta(days=days)).isoformat()
+    published_min = (today_kst() - timedelta(days=days)).isoformat()
     per_seed_count = min(30, max(10, limit))
     jobs_by_id: dict[str, dict[str, Any]] = {}
     for seed in seeds:
@@ -684,7 +690,7 @@ def demo_job_posts() -> list[dict[str, Any]]:
             "industry": "반도체·전자",
             "location": "서울",
             "job_type": "정규직",
-            "posting_date": date.today().isoformat(),
+            "posting_date": today_kst().isoformat(),
             "expiration_date": "",
             "search_seeds": ["연결결산", "내부회계", "K-IFRS"],
         },
@@ -697,7 +703,7 @@ def demo_job_posts() -> list[dict[str, Any]]:
             "industry": "플랫폼",
             "location": "서울",
             "job_type": "정규직",
-            "posting_date": date.today().isoformat(),
+            "posting_date": today_kst().isoformat(),
             "expiration_date": "",
             "search_seeds": ["국제조세", "이전가격"],
         },
@@ -710,7 +716,7 @@ def demo_job_posts() -> list[dict[str, Any]]:
             "industry": "지주회사",
             "location": "서울",
             "job_type": "정규직",
-            "posting_date": date.today().isoformat(),
+            "posting_date": today_kst().isoformat(),
             "expiration_date": "",
             "search_seeds": ["M&A", "Valuation", "투자검토"],
         },
@@ -925,6 +931,15 @@ def build_report(
         disclosure_bundle["history"],
         years=years,
     )
+    first_requested_year = config.current_year - years
+    last_requested_year = config.current_year - 1
+    audit_history = [
+        row
+        for row in audit_history
+        if first_requested_year
+        <= int_or_zero(row.get("bsns_year"))
+        <= last_requested_year
+    ]
     service_history = fetch_service_contracts(corp["corp_code"], config, years=min(years, 5))
     executive_history = fetch_executive_status(corp["corp_code"], config, years=min(years, 3))
     analysis = analyze_history(corp, audit_history, config.current_year)
@@ -932,7 +947,7 @@ def build_report(
         corp,
         company_profile,
         analysis,
-        as_of=date.today(),
+        as_of=today_kst(),
         executives=executive_history,
         special_issues=disclosure_bundle["special_issues"],
         tender_notices=disclosure_bundle["tender_notices"],
@@ -1041,7 +1056,7 @@ def fetch_external_audit_disclosures(
 ) -> dict[str, Any]:
     start_year = max(1999, config.current_year - years - 1)
     start_date = f"{start_year}0101"
-    end_date = date.today().strftime("%Y%m%d")
+    end_date = today_kst().strftime("%Y%m%d")
     try:
         filings = dart_list_filings(
             corp_code,
@@ -1097,7 +1112,7 @@ def fetch_annual_report_filings(
 ) -> list[dict[str, Any]]:
     start_year = max(1999, config.current_year - years - 1)
     start_date = f"{start_year}0101"
-    end_date = date.today().strftime("%Y%m%d")
+    end_date = today_kst().strftime("%Y%m%d")
     try:
         filings = dart_list_filings(
             corp_code,
@@ -1336,9 +1351,9 @@ def build_coverage_summary(
 ) -> dict[str, Any]:
     history_years = {str(row.get("bsns_year", "")).strip() for row in history}
     annual_report_years = {str(row.get("business_year", "")).strip() for row in annual_report_filings if str(row.get("business_year", "")).strip()}
-    recent_years = [str(year) for year in range(current_year - 1, current_year - min(years, 4), -1)]
-    annual_report_gap_years = [year for year in recent_years if year in annual_report_years and year not in history_years]
-    missing_recent_years = [year for year in recent_years if year not in history_years and year not in annual_report_years]
+    requested_years = [str(year) for year in range(current_year - 1, current_year - years - 1, -1)]
+    annual_report_gap_years = [year for year in requested_years if year in annual_report_years and year not in history_years]
+    missing_recent_years = [year for year in requested_years if year not in history_years and year not in annual_report_years]
     notes = [
         "정기보고서 주요정보 API를 우선 사용하고, 누락 연도는 외부감사관련 감사보고서 공시목록으로 보완합니다."
     ]
@@ -1357,6 +1372,7 @@ def build_coverage_summary(
         "periodic_report_api_rows": len(structured_history),
         "external_audit_report_rows": len(external_history),
         "annual_report_rows": len(annual_report_filings),
+        "requested_years": requested_years,
         "annual_report_years": sorted(annual_report_years, reverse=True),
         "annual_report_gap_years": annual_report_gap_years,
         "special_issue_rows": len(special_issues),
@@ -1733,13 +1749,16 @@ def periodic_subject_estimate(corp: dict[str, str], corp_cls: str) -> dict[str, 
         return {
             "status": "likely_subject",
             "label": f"{CORP_CLASS_LABELS[corp_cls]} 상장회사",
-            "reason": "OpenDART 법인구분상 유가증권시장/코스닥 상장회사로 확인됩니다.",
+            "reason": (
+                "OpenDART 법인구분상 유가증권시장/코스닥 상장회사입니다. "
+                "주기적 지정 시점은 동일 감사인 연차가 아니라 자유선임·지정 사업연도 구분을 확인해야 판단할 수 있습니다."
+            ),
         }
     if corp_cls == "N":
         return {
-            "status": "needs_review",
-            "label": "코넥스",
-            "reason": "코넥스 회사는 주기적 지정 적용 여부와 예외를 별도 확인해야 합니다.",
+            "status": "excluded",
+            "label": "코넥스(주기적 지정 제외)",
+            "reason": "현행 외감법 시행령 제15조제5항에 따라 코넥스 상장법인은 주기적 지정 대상에서 제외됩니다.",
         }
     return {
         "status": "out_of_listed_scope",
@@ -1753,7 +1772,6 @@ def estimate_event(
     previous_run: dict[str, Any] | None,
     subject: dict[str, str],
 ) -> dict[str, Any]:
-    length = latest_run["length"]
     subject_status = subject["status"]
     if subject_status == "out_of_listed_scope":
         return {
@@ -1763,49 +1781,23 @@ def estimate_event(
             "years_remaining": None,
             "message": "현재 버전은 상장사 공개 데이터 기반 영업 레이더로 제한되어 있습니다.",
         }
-
-    if previous_run and length <= 3 and previous_run["length"] >= 6:
-        remaining = max(0, 3 - length)
-        if remaining == 0:
-            headline = "지정감사 3년차 가능성: 다음 자유선임 전환 검토 필요"
-            message = "이전 감사인이 6년 이상 연속된 뒤 감사인이 변경되어, 현재 감사인이 지정감사인일 가능성이 있습니다."
-        else:
-            headline = f"지정감사 {length}년차 가능성: 약 {remaining}개 사업연도 남음"
-            message = "이전 장기 자유선임 뒤 감사인이 변경된 패턴입니다. 지정감사 여부를 FSS 통지 또는 회사 공시로 확인해야 합니다."
+    if subject_status == "excluded":
         return {
-            "type": "possible_designated_cycle",
-            "headline": headline,
-            "confidence": "medium",
-            "years_remaining": remaining,
-            "message": message,
+            "type": "periodic_designation_excluded",
+            "headline": "코넥스: 주기적 지정 제외",
+            "confidence": "high",
+            "years_remaining": None,
+            "message": "코넥스 상장법인은 주기적 지정 대상에서 제외되며, 다른 직권지정 사유는 별도로 확인해야 합니다.",
         }
-
-    if length >= 6:
-        return {
-            "type": "six_year_threshold_reached",
-            "headline": "동일 감사인 6년 이상: 주기적 지정/유예/분산지정 확인 필요",
-            "confidence": "medium",
-            "years_remaining": 0,
-            "message": "상장회사 등은 6년 자유선임 후 3년 지정 제도 적용 가능성이 있으므로 FSS 지정 통지, 유예, 분산지정 여부를 확인해야 합니다.",
-        }
-
-    remaining = 6 - length
-    if length >= 4:
-        confidence = "medium" if subject_status == "likely_subject" else "low"
-        return {
-            "type": "approaching_six_year_threshold",
-            "headline": f"동일 감사인 {length}년차: 약 {remaining}개 사업연도 후 6년 기준 도달",
-            "confidence": confidence,
-            "years_remaining": remaining,
-            "message": "동일 감사인이 계속 유지된다는 가정하에 주기적 지정 검토 시점이 다가옵니다.",
-        }
-
     return {
-        "type": "early_tenure",
-        "headline": f"동일 감사인 {length}년차: 단기 모니터링",
-        "confidence": "medium" if subject_status == "likely_subject" else "low",
-        "years_remaining": 6 - length,
-        "message": "현재 공개 이력상 즉시 주기적 지정 임박 신호는 약합니다.",
+        "type": "periodic_cycle_review",
+        "headline": "주기적 지정 주기: 원문 확인 필요",
+        "confidence": "low",
+        "years_remaining": None,
+        "message": (
+            "OpenDART 감사인 이력만으로는 각 사업연도가 자유선임인지 지정인지 구분되지 않습니다. "
+            "동일 감사인 연속연차를 6년 자유선임 기간으로 간주하지 않습니다."
+        ),
     }
 
 
@@ -1815,12 +1807,10 @@ def build_follow_up(subject: dict[str, str], event: dict[str, Any]) -> list[str]
         "감사인 변경 사유가 자유선임인지 지정인지 사업보고서 원문에서 확인",
         "감사위원회 또는 감사인선임위원회 승인 및 선임보고 기한 확인",
     ]
-    if subject["status"] != "likely_subject":
-        checks.append("코넥스 또는 기타 예외의 주기적 지정 적용 여부 확인")
-    if event["type"] == "possible_designated_cycle":
-        checks.append("지정감사 종료 후 최초 자유선임 시 전기 지정감사인 배제 규정 적용 여부 확인")
-    if event["type"] in {"six_year_threshold_reached", "approaching_six_year_threshold"}:
-        checks.append("주기적 지정 유예 또는 분산지정 적용 여부 확인")
+    if subject["status"] == "excluded":
+        checks.append("코넥스 주기적 지정 제외와 별개인 직권지정 사유 존재 여부 확인")
+    elif subject["status"] == "likely_subject":
+        checks.append("각 사업연도의 자유선임·지정 구분과 주기적 지정 유예·분산지정 여부 확인")
     return checks
 
 
@@ -1843,9 +1833,15 @@ def attach_event_schedule(
         special_issues=special_issues or [],
         tender_notices=tender_notices or [],
     )
-    schedule = build_audit_event_schedule(corp, company_profile, analysis, as_of=as_of)
+    schedule = build_audit_event_schedule(
+        corp,
+        company_profile,
+        analysis,
+        as_of=as_of,
+        audit_committee_required=bool(audit_committee_evidence(executives or [])),
+    )
     analysis["event_schedule"] = schedule
-    analysis["next_timeline_event"] = next_timeline_event(schedule)
+    analysis["next_timeline_event"] = next_timeline_event(schedule, as_of=as_of)
 
 
 def build_audit_applicability(
@@ -1865,13 +1861,15 @@ def build_audit_applicability(
     corp_label = CORP_CLASS_LABELS.get(corp_cls, "알 수 없음")
     is_listed = corp_cls in LISTED_CORP_CLASSES
     subject = analysis.get("periodic_subject_estimate") or {}
-    event = analysis.get("estimated_event") or {}
-    current_run = analysis.get("current_run") or {}
     fiscal_end_month = resolve_fiscal_end_month(corp, company_profile)
     latest_year = int_or_zero(analysis.get("latest_business_year"))
     next_fiscal_year = latest_year + 1 if latest_year else as_of.year
-    appointment_date = appointment_deadline(next_fiscal_year, fiscal_end_month)
     audit_committee = audit_committee_evidence(executives)
+    appointment_date = appointment_deadline(
+        next_fiscal_year,
+        fiscal_end_month,
+        audit_committee_required=bool(audit_committee),
+    )
     rules: list[dict[str, Any]] = []
 
     if is_listed:
@@ -1914,13 +1912,17 @@ def build_audit_applicability(
         audit_rule_card(
             "appointment_deadline",
             "감사인 선임기한",
-            "review",
-            "기본 적용·예외 확인",
+            "likely" if audit_committee else "review",
+            "감사위원회 기준" if audit_committee else "일반 기준·연장 확인",
             (
-                f"{next_fiscal_year} 사업연도 기준 기본 선임기한은 {appointment_date.isoformat()}로 계산됩니다. "
-                "다만 감사위원회 의무설치 회사는 사업연도 개시 전 선임 기준을 우선 확인해야 합니다."
+                f"{next_fiscal_year} 사업연도 선임기한은 {appointment_date.isoformat()}로 계산됩니다. "
+                + (
+                    f"{audit_committee} 공개 임원자료에 감사위원회 문구가 있어 사업연도 개시 전일을 검토 경계로 표시했습니다."
+                    if audit_committee
+                    else appointment_deadline_note(next_fiscal_year, fiscal_end_month)
+                )
             ),
-            "정관, 지배구조보고서, 감사위원회 설치 의무 여부를 확인해 실제 마감일을 확정하세요.",
+            "정관, 지배구조보고서, 감사위원회 설치 의무와 휴일 연장 여부를 확인해 실제 마감일을 확정하세요.",
             ["external_audit_act_10", "fss_2026_appointment"],
         )
     )
@@ -1991,25 +1993,25 @@ def build_audit_applicability(
         )
     )
 
-    length = int_or_zero(current_run.get("length"))
-    if subject.get("status") == "likely_subject" and length >= PERIODIC_APPOINTMENT_YEARS:
-        periodic_status = "warning"
-        periodic_label = "주기적 지정 후보"
+    if subject.get("status") == "likely_subject":
+        periodic_status = "review"
+        periodic_label = "자유·지정 구분 확인"
         periodic_evidence = (
-            f"상장회사이고 현재 감사인이 공개 이력상 {length}개 사업연도 연속 확인되어 "
-            "6년 자유선임 후 지정감사 검토 기준에 도달했거나 임박했을 가능성이 큽니다."
+            "주기적 지정은 동일 감사인이 몇 년 연속이었는지가 아니라 법 제10조에 따라 감사인을 선임한 "
+            "자유선임 사업연도를 기준으로 판단합니다. OpenDART 감사인 이력에는 자유선임·지정 구분이 없어 "
+            "숫자형 도래일을 산출하지 않았습니다."
         )
-    elif subject.get("status") == "likely_subject":
-        periodic_status = "likely"
-        periodic_label = "모니터링"
-        periodic_evidence = (
-            f"상장회사로 주기적 지정 제도 적용 대상 가능성이 높습니다. "
-            f"현재 공개 이력상 동일 감사인 연속 {length}개 사업연도로 계산됩니다."
-        )
+        periodic_action = "금감원 지정 사전·본통지와 회사의 감사인 선임보고 원문에서 사업연도별 자유선임·지정 구분을 확인하세요."
+    elif subject.get("status") == "excluded":
+        periodic_status = "not_applicable"
+        periodic_label = "주기적 지정 제외"
+        periodic_evidence = subject.get("reason") or "코넥스 상장법인은 주기적 지정 대상에서 제외됩니다."
+        periodic_action = "다른 직권지정 사유가 있는지는 외감법 제11조제1항에 따라 별도로 확인하세요."
     else:
         periodic_status = "review"
-        periodic_label = "예외 확인"
+        periodic_label = "적용 범위 확인"
         periodic_evidence = subject.get("reason") or "주기적 지정 적용 대상 여부를 별도 확인해야 합니다."
+        periodic_action = "회사 유형과 법 적용 범위를 원문 자료로 확인하세요."
     rules.append(
         audit_rule_card(
             "periodic_designation",
@@ -2017,23 +2019,10 @@ def build_audit_applicability(
             periodic_status,
             periodic_label,
             periodic_evidence,
-            "금감원 지정 사전/본통지, 유예·분산지정, 지정감사 종료연도 여부를 원문 자료로 확인하세요.",
-            ["external_audit_act_11", "external_audit_decree_16"],
+            periodic_action,
+            ["external_audit_act_11", "external_audit_decree_15"],
         )
     )
-
-    if event.get("type") == "possible_designated_cycle":
-        rules.append(
-            audit_rule_card(
-                "designation_exit",
-                "지정감사 종료 후 자유선임 전환",
-                "review",
-                "확인 필요",
-                "이전 감사인이 6년 이상 이어진 뒤 현재 감사인으로 바뀐 패턴이라 현재 감사인이 지정감사인일 수 있습니다.",
-                "지정감사 3년 종료 여부와 지정 사업연도 이후 최초 사업연도 전기 지정감사인 배제 규정을 확인하세요.",
-                ["external_audit_act_11"],
-            )
-        )
 
     if special_issues:
         issue_labels = ", ".join(short(str(item.get("issue_type") or item.get("report_nm") or ""), 24) for item in special_issues[:3])
@@ -2084,7 +2073,10 @@ def source_refs(source_ids: list[str]) -> list[dict[str, str]]:
 
 def audit_committee_evidence(executives: list[dict[str, Any]]) -> str:
     for row in executives:
-        text = " ".join(str(row.get(key, "")) for key in ("ofcps", "chrg_job", "main_career", "rm"))
+        # Only current position/duty fields establish committee membership.
+        # A past-career sentence mentioning an audit committee is not enough to
+        # apply the stricter pre-fiscal-year appointment deadline.
+        text = " ".join(str(row.get(key, "")) for key in ("ofcps", "chrg_job"))
         if "감사위원" in text or "감사위원회" in text:
             name = str(row.get("nm", "")).strip()
             return f"임원 현황에서 {name or '임원'}의 감사위원회 관련 문구가 확인됩니다."
@@ -2097,57 +2089,23 @@ def build_audit_event_schedule(
     analysis: dict[str, Any],
     *,
     as_of: date,
+    audit_committee_required: bool = False,
 ) -> list[dict[str, Any]]:
     if analysis.get("status") != "ok":
         return []
 
     current_run = analysis.get("current_run") or {}
-    previous_run = analysis.get("previous_run") or {}
-    subject = analysis.get("periodic_subject_estimate") or {}
-    event = analysis.get("estimated_event") or {}
     fiscal_end_month = resolve_fiscal_end_month(corp, company_profile)
     events: list[dict[str, Any]] = []
 
-    term_event = build_three_year_term_event(current_run, fiscal_end_month, as_of)
+    term_event = build_three_year_term_event(
+        current_run,
+        fiscal_end_month,
+        as_of,
+        audit_committee_required=audit_committee_required,
+    )
     if term_event:
         events.append(term_event)
-
-    designation_exit = build_designation_exit_event(
-        current_run,
-        previous_run,
-        fiscal_end_month,
-        subject,
-        event,
-        as_of,
-    )
-    if designation_exit:
-        events.append(designation_exit)
-
-    periodic_event = build_periodic_designation_event(
-        current_run,
-        fiscal_end_month,
-        subject,
-        as_of,
-        base_years=PERIODIC_APPOINTMENT_YEARS,
-        kind="periodic_designation",
-        title="주기적 지정 후보",
-        detail_suffix="6년 자유선임으로 추정되는 경우 금융당국 지정감사 후보가 됩니다.",
-    )
-    if periodic_event:
-        events.append(periodic_event)
-
-    deferred_event = build_periodic_designation_event(
-        current_run,
-        fiscal_end_month,
-        subject,
-        as_of,
-        base_years=GOVERNANCE_DEFERRAL_YEARS,
-        kind="governance_deferral",
-        title="우수기업 유예 적용 시 후보",
-        detail_suffix="회계·감사 지배구조 우수기업 유예가 인정되는 경우의 9년 자율선임 시나리오입니다.",
-    )
-    if deferred_event:
-        events.append(deferred_event)
 
     events.sort(key=lambda item: (item.get("event_date", ""), item.get("priority_order", 99)))
     for index, item in enumerate(events, start=1):
@@ -2160,6 +2118,8 @@ def build_three_year_term_event(
     current_run: dict[str, Any],
     fiscal_end_month: int,
     as_of: date,
+    *,
+    audit_committee_required: bool = False,
 ) -> dict[str, Any] | None:
     start_year = int_or_zero(current_run.get("start_year"))
     end_year = int_or_zero(current_run.get("end_year"))
@@ -2171,8 +2131,37 @@ def build_three_year_term_event(
     block_start = start_year + (years_into_run // THREE_YEAR_APPOINTMENT_TERM) * THREE_YEAR_APPOINTMENT_TERM
     block_end = block_start + THREE_YEAR_APPOINTMENT_TERM - 1
     review_fiscal_year = block_end + 1
-    event_date = appointment_deadline(review_fiscal_year, fiscal_end_month)
+    event_date = appointment_deadline(
+        review_fiscal_year,
+        fiscal_end_month,
+        audit_committee_required=audit_committee_required,
+    )
+    rolled_blocks = 0
+    while event_date <= as_of:
+        block_start += THREE_YEAR_APPOINTMENT_TERM
+        block_end += THREE_YEAR_APPOINTMENT_TERM
+        review_fiscal_year += THREE_YEAR_APPOINTMENT_TERM
+        event_date = appointment_deadline(
+            review_fiscal_year,
+            fiscal_end_month,
+            audit_committee_required=audit_committee_required,
+        )
+        rolled_blocks += 1
     days_remaining = (event_date - as_of).days
+    deadline_basis = (
+        "공개 임원자료에서 감사위원회 문구가 확인되어 사업연도 개시 전일을 검토 경계로 적용했습니다."
+        if audit_committee_required
+        else appointment_deadline_note(review_fiscal_year, fiscal_end_month)
+    )
+    history_limit = (
+        f"최신 완료 사업연도 공개이력은 {end_year}년까지입니다. "
+        + (
+            f"그 이후 {rolled_blocks}개 3년 구간에도 동일 감사인이 재선임된다는 계산상 가정이 포함됩니다. "
+            if rolled_blocks
+            else ""
+        )
+        + "실제 선임·교체·지정 결과는 감사인 선임보고와 금감원 통지 원문에서 확인해야 합니다."
+    )
     return audit_timeline_event(
         kind="three_year_term",
         title="3개 사업연도 동일 감사인 계약 검토",
@@ -2181,93 +2170,15 @@ def build_three_year_term_event(
         days_remaining=days_remaining,
         detail=(
             f"{auditor or '현재 감사인'} 기준 {block_start}~{block_end} 사업연도 3년 구간 이후 "
-            "재선임, 교체, 지정 여부를 확인해야 합니다."
+            f"재선임, 교체, 지정 여부를 확인해야 합니다. {history_limit}"
         ),
-        basis="주권상장법인 등은 연속 3개 사업연도 동일 감사인 선임 의무가 있습니다.",
+        basis=(
+            "주권상장법인 등은 연속 3개 사업연도 동일 감사인 선임 의무가 있습니다. "
+            + deadline_basis
+        ),
         confidence="medium",
         source_ids=["external_audit_act_10", "fss_2026_appointment"],
         priority_order=20,
-    )
-
-
-def build_designation_exit_event(
-    current_run: dict[str, Any],
-    previous_run: dict[str, Any],
-    fiscal_end_month: int,
-    subject: dict[str, str],
-    estimated_event: dict[str, Any],
-    as_of: date,
-) -> dict[str, Any] | None:
-    if subject.get("status") == "out_of_listed_scope":
-        return None
-    if estimated_event.get("type") != "possible_designated_cycle":
-        return None
-
-    start_year = int_or_zero(current_run.get("start_year"))
-    if not start_year:
-        return None
-    term_end_year = start_year + 2
-    transition_fiscal_year = term_end_year + 1
-    event_date = appointment_deadline(transition_fiscal_year, fiscal_end_month)
-    days_remaining = (event_date - as_of).days
-    previous_auditor = str(previous_run.get("auditor", "")).strip()
-    return audit_timeline_event(
-        kind="designation_exit",
-        title="지정감사 종료 후 자유선임 전환 후보",
-        event_date=event_date,
-        fiscal_year=transition_fiscal_year,
-        days_remaining=days_remaining,
-        detail=(
-            f"이전 감사인 {previous_auditor or '확인 감사인'}이 6년 이상 이어진 뒤 감사인이 바뀐 패턴입니다. "
-            f"{transition_fiscal_year} 사업연도 자유선임 전환 가능성을 확인하세요."
-        ),
-        basis="주기적 지정은 통상 3개 사업연도 지정감사 이후 자유선임 전환 검토가 필요합니다.",
-        confidence="medium",
-        source_ids=["external_audit_act_11", "external_audit_decree_16"],
-        priority_order=10,
-    )
-
-
-def build_periodic_designation_event(
-    current_run: dict[str, Any],
-    fiscal_end_month: int,
-    subject: dict[str, str],
-    as_of: date,
-    *,
-    base_years: int,
-    kind: str,
-    title: str,
-    detail_suffix: str,
-) -> dict[str, Any] | None:
-    if subject.get("status") == "out_of_listed_scope":
-        return None
-
-    start_year = int_or_zero(current_run.get("start_year"))
-    end_year = int_or_zero(current_run.get("end_year"))
-    length = int_or_zero(current_run.get("length"))
-    auditor = str(current_run.get("auditor", "")).strip()
-    if not start_year or not end_year:
-        return None
-
-    candidate_fiscal_year = start_year + base_years
-    event_date = appointment_deadline(candidate_fiscal_year, fiscal_end_month)
-    days_remaining = (event_date - as_of).days
-    remaining_years = max(0, base_years - length)
-    confidence = "medium" if subject.get("status") == "likely_subject" else "low"
-    return audit_timeline_event(
-        kind=kind,
-        title=title,
-        event_date=event_date,
-        fiscal_year=candidate_fiscal_year,
-        days_remaining=days_remaining,
-        detail=(
-            f"{auditor or '현재 감사인'} 연속 {length}개 사업연도 확인. "
-            f"{remaining_years}개 사업연도 후 기준 도달로 계산했습니다. {detail_suffix}"
-        ),
-        basis="OpenDART 감사인 이력에는 자유선임/지정 구분이 직접 표시되지 않아 동일 감사인 연속연차를 기준으로 추정합니다.",
-        confidence=confidence,
-        source_ids=["external_audit_act_11", "external_audit_decree_16"],
-        priority_order=30 if base_years == PERIODIC_APPOINTMENT_YEARS else 40,
     )
 
 
@@ -2300,10 +2211,18 @@ def audit_timeline_event(
     }
 
 
-def next_timeline_event(schedule: list[dict[str, Any]]) -> dict[str, Any]:
-    if not schedule:
+def next_timeline_event(schedule: list[dict[str, Any]], *, as_of: date) -> dict[str, Any]:
+    candidates = []
+    for item in schedule:
+        try:
+            event_date = date.fromisoformat(str(item.get("event_date", "")))
+        except ValueError:
+            continue
+        if event_date >= as_of:
+            candidates.append((event_date, item))
+    if not candidates:
         return {}
-    return schedule[0]
+    return min(candidates, key=lambda pair: pair[0])[1]
 
 
 def resolve_fiscal_end_month(corp: dict[str, str], company_profile: dict[str, Any]) -> int:
@@ -2324,8 +2243,26 @@ def fiscal_year_start(fiscal_year: int, fiscal_end_month: int) -> date:
     return date(fiscal_year - 1, start_month, 1)
 
 
-def appointment_deadline(fiscal_year: int, fiscal_end_month: int) -> date:
-    return fiscal_year_start(fiscal_year, fiscal_end_month) + timedelta(days=APPOINTMENT_DEADLINE_DAYS)
+def appointment_deadline(
+    fiscal_year: int,
+    fiscal_end_month: int,
+    *,
+    audit_committee_required: bool = False,
+) -> date:
+    start = fiscal_year_start(fiscal_year, fiscal_end_month)
+    if audit_committee_required:
+        return start - timedelta(days=1)
+    if fiscal_year == 2026 and fiscal_end_month == 12:
+        # 금융감독원 2026 선임 안내에 명시된 12월 결산 일반회사 기한.
+        return date(2026, 2, 19)
+    # 법문상 "사업연도 개시일부터 45일 이내": 개시일을 첫날로 산입한다.
+    return start + timedelta(days=APPOINTMENT_DEADLINE_DAYS - 1)
+
+
+def appointment_deadline_note(fiscal_year: int, fiscal_end_month: int) -> str:
+    if fiscal_year == 2026 and fiscal_end_month == 12:
+        return "금융감독원 2026 안내의 12월 결산 일반회사 공식 기한(2026-02-19)을 적용했습니다."
+    return "사업연도 개시일을 첫날로 산입한 45일째이며, 토요일·공휴일 등에 따른 연장은 별도 확인이 필요합니다."
 
 
 def dday_label(days_remaining: int) -> str:
@@ -2482,43 +2419,22 @@ def estimate_sales_case(
         case["caveats"] = caveats
         return case
 
-    if event_type == "possible_designated_cycle":
-        remaining = event.get("years_remaining")
-        timing = "당기 또는 차기 자유선임 전환 확인" if remaining == 0 else f"약 {remaining}개 사업연도 후 전환 가능성 점검"
+    if event_type == "periodic_designation_excluded":
         case = {
-            "code": "designation_exit_opportunity",
-            "label": "지정감사 종료/자유선임 전환 후보",
-            "priority": "high" if remaining == 0 else "medium",
-            "timing": timing,
-            "next_action": "현재 감사인이 지정감사인인지 확인하고, 지정 3년 종료 후 자유선임 전환 가능 시점에 맞춰 사전 컨택 후보로 관리하세요.",
-            "rationale": event.get("message", ""),
-        }
-    elif event_type == "six_year_threshold_reached":
-        case = {
-            "code": "periodic_designation_watch",
-            "label": "주기적 지정 도래 확인",
-            "priority": "high",
-            "timing": "즉시 확인",
-            "next_action": "6년 자유선임 기준 도달 여부, 주기적 지정 통지, 유예·분산지정 적용 여부를 확인하세요.",
-            "rationale": event.get("message", ""),
-        }
-    elif event_type == "approaching_six_year_threshold":
-        remaining = event.get("years_remaining")
-        case = {
-            "code": "periodic_designation_watch",
-            "label": "6년 기준 접근",
-            "priority": "medium",
-            "timing": f"약 {remaining}개 사업연도 후 6년 기준 도달",
-            "next_action": "현재 감사인 유지가 계속되는지 모니터링하고, 지정제·유예제 적용 여부를 선제 확인하세요.",
+            "code": "listed_monitoring",
+            "label": "코넥스 일반 선임 모니터링",
+            "priority": "low",
+            "timing": "공시 발생 시 확인",
+            "next_action": "주기적 지정 도래일을 계산하지 말고 감사인 변경 공시와 별도 직권지정 사유를 확인하세요.",
             "rationale": event.get("message", ""),
         }
     elif segment_code == "listed":
         case = {
             "code": "listed_monitoring",
-            "label": "상장사 장기 모니터링",
+            "label": "상장사 선임주기 원문 확인",
             "priority": "low",
             "timing": "분기별 모니터링",
-            "next_action": "현재 3년 계약 구간, 지정제 적용 여부, 감사인 변경 공시를 계속 모니터링하세요.",
+            "next_action": "현재 3년 계약 구간과 사업연도별 자유선임·지정 구분을 원문으로 확인하고 감사인 변경 공시를 모니터링하세요.",
             "rationale": event.get("message", ""),
         }
     else:
@@ -2732,12 +2648,7 @@ def build_lead_recommendation(
 
 def lead_timing_points(sales_case: dict[str, Any], event: dict[str, Any]) -> tuple[int, str]:
     code = sales_case.get("code", "")
-    priority = sales_case.get("priority", "")
-    if code == "designation_exit_opportunity":
-        points = 34 if event.get("years_remaining") == 0 else 28
-    elif code == "periodic_designation_watch":
-        points = 26 if priority == "high" else 22
-    elif code == "compliance_risk_watch":
+    if code == "compliance_risk_watch":
         points = 20
     elif code == "listed_monitoring":
         points = 12
@@ -3066,7 +2977,7 @@ def lead_friction_points(
     reasons = []
     if is_current_firm:
         points -= 18
-        reasons.append(f"현재 감사인이 {firm_label}로 보여 신규 감사 수임 리드는 아님")
+        reasons.append(f"최근 완료 사업연도 공시 감사인이 {firm_label}로 보여 신규 감사 수임 리드는 아님")
     if special_issues:
         points -= 4
         reasons.append("특이공시 원문 확인 전 컨택 리스크 존재")
@@ -3109,11 +3020,6 @@ def build_opening_angle(
 ) -> str:
     if is_current_firm:
         return "기존 감사 관계를 전제로 독립성 허용 범위 내 세무·딜·내부통제 후속 니즈를 확인"
-    case_code = sales_case.get("code", "")
-    if case_code == "designation_exit_opportunity":
-        return "지정감사 종료 후 자유선임 전환 가능 시점을 근거로 사전 관계 형성"
-    if case_code == "periodic_designation_watch":
-        return "주기적 지정·유예·분산지정 판단을 돕는 제도 점검 미팅 제안"
     flag_codes = {flag.get("code") for flag in flags}
     if "financial_candidate" in flag_codes:
         return "금융회사 규제·내부통제·감사위원회 맥락에서 감사 품질과 전환 가능성 점검"
@@ -3133,9 +3039,6 @@ def suggested_services_for_persona(
     for service in ["외부감사 선임/전환 리서치", "내부회계관리제도 및 감사위원회 커뮤니케이션 점검"]:
         if service not in services:
             services.append(service)
-    case_code = sales_case.get("code", "")
-    if case_code in {"designation_exit_opportunity", "periodic_designation_watch"}:
-        services.append("주기적 지정·자유선임 전환 사전 진단")
     flag_codes = {flag.get("code") for flag in flags}
     if "financial_candidate" in flag_codes:
         services.append("금융규제·리스크관리·내부통제 자문")
@@ -3174,12 +3077,12 @@ def build_recommendation_caveats(
 ) -> list[str]:
     firm_label = str(persona.get("label") or "해당 회계법인")
     caveats = [
-        "추천 점수는 공개 공시와 설정된 firm context 기반의 영업 리서치 신호입니다.",
+        "휴리스틱 참고점수는 공개 공시와 설정된 firm context 기반의 영업 리서치 신호이며, 확률이나 보장값이 아닙니다.",
         "감사 수임 가능성은 독립성, 이해상충, 품질관리, 내부 승인 절차를 통과해야 판단할 수 있습니다.",
         "개인 인적사항·학력·이력·네트워크 정보는 합법적으로 보유했거나 공개·동의된 범위의 업무 관련 태그로만 사용해야 합니다.",
     ]
     if is_current_firm:
-        caveats.append(f"현재 감사인이 {firm_label}이면 신규 감사영업이 아니라 유지·부가자문 관점으로 해석해야 합니다.")
+        caveats.append(f"최근 완료 사업연도 공시 감사인이 {firm_label}이면 신규 감사영업이 아니라 유지·부가자문 관점으로 해석해야 합니다.")
     if special_issues:
         caveats.append("특이공시가 있는 회사는 컨택 전 원문과 후속 정정 여부를 먼저 확인해야 합니다.")
     return caveats
@@ -3279,7 +3182,7 @@ def recommendation_timing_sort_key(item: dict[str, Any]) -> tuple[int, int, str]
     else:
         days = int_or_zero(raw_days)
         if days < 0:
-            days = 0
+            days = 99999
     return (
         days,
         -int_or_zero(item.get("fit_score")),
@@ -3305,12 +3208,12 @@ def build_demo_report() -> dict[str, Any]:
     }
     executives = demo_executives()
     tender_notices = demo_tender_notices(corp)
-    analysis = analyze_history(corp, history, date.today().year)
+    analysis = analyze_history(corp, history, today_kst().year)
     attach_event_schedule(
         corp,
         {},
         analysis,
-        as_of=date.today(),
+        as_of=today_kst(),
         executives=executives,
         special_issues=[],
         tender_notices=tender_notices,
@@ -3322,7 +3225,7 @@ def build_demo_report() -> dict[str, Any]:
         [],
         [],
         years=len(history),
-        current_year=date.today().year,
+        current_year=today_kst().year,
         external_error=None,
     )
     sales_strategy = build_sales_strategy(corp, analysis, coverage, [], {})
@@ -3470,9 +3373,9 @@ def render_recommendations(payload: dict[str, Any], output_format: str) -> str:
             [
                 f"### {index}. {company.get('corp_name', '')}",
                 "",
-                f"- 추천등급: **{item.get('grade', '')} / {item.get('fit_score', 0)}점**",
+                f"- 휴리스틱 참고점수: **{item.get('fit_score', 0)}점 (등급 {item.get('grade', '')})**",
                 f"- 판단: {item.get('verdict', '')}",
-                f"- 현재 감사인: {item.get('current_auditor') or '-'}",
+                f"- 최근 완료 사업연도 공시 감사인: {item.get('current_auditor') or '-'}",
                 f"- 세그먼트: {item.get('segment', '')}",
                 f"- 케이스: {item.get('sales_case', '')}",
                 f"- 첫 컨택 각도: {item.get('opening_angle', '')}",
@@ -3559,13 +3462,13 @@ def render_markdown(payload: dict[str, Any]) -> str:
     else:
         lines.extend(
             [
-                f"- 현재 감사인: **{analysis['current_auditor']}**",
+                f"- 최근 완료 사업연도 공시 감사인: **{analysis['current_auditor']}**",
                 f"- 최신 사업연도: **{analysis['latest_business_year']}**",
                 f"- 동일 감사인 연속연차: **{analysis['consecutive_years']}년**",
                 f"- 법인구분: **{analysis['corp_class_label']}**",
                 f"- 관련 기준: **{next_event.get('title', '-')}**",
                 f"- 교체/검토 시기: **{next_event.get('event_date', '-')}**",
-                f"- 남은 기간: **{next_event.get('dday_label', '-')}**",
+                f"- 기준일 대비: **{next_event.get('dday_label', '-')}**",
                 f"- 기준 근거: {next_event.get('basis', '')}",
                 f"- 기준 출처: {source_labels(next_event.get('sources', [])) or '-'}",
             ]
@@ -3578,7 +3481,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
                     "",
                     "## 관련 기준별 일정",
                     "",
-                    "| 순서 | 예상일 | D-day | 사업연도 | 이벤트 | 근거 | 출처 |",
+                    "| 순서 | 예상일 | 기준일 대비 | 사업연도 | 이벤트 | 근거 | 출처 |",
                     "| --- | --- | --- | --- | --- | --- | --- |",
                 ]
             )
@@ -3654,7 +3557,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
 
     contracts = payload.get("service_contracts", [])
     if contracts:
-        lines.extend(["", "## 감사용역 체결현황", "", "| 사업연도 | 감사인 | 계약보수 | 계약시간 | 실제보수 | 실제시간 | 시간당 보수 |", "| --- | --- | --- | --- | --- | --- | --- |"])
+        lines.extend(["", "## 감사용역 체결현황", "", "| 사업연도 | 감사인 | 계약보수(백만원) | 계약시간(시간) | 실제보수(백만원) | 실제시간(시간) | 시간당 보수(원/시간) |", "| --- | --- | --- | --- | --- | --- | --- |"])
         for row in contracts[:8]:
             lines.append(
                 "| "
@@ -4105,7 +4008,7 @@ INDEX_HTML = r"""<!doctype html>
   <header>
     <div>
       <h1>감사인 교체 시기 조회</h1>
-      <div class="subtitle">OpenDART 기반 상장사 감사인·교체 기준·남은 기간</div>
+      <div class="subtitle">OpenDART 기반 상장사 감사인·교체 기준·기준일 대비 일정</div>
     </div>
     <nav class="site-nav" aria-label="서비스 메뉴">
       <a class="active" href="/">감사인 교체 레이더</a>
@@ -4212,9 +4115,9 @@ INDEX_HTML = r"""<!doctype html>
         ${meta}
         <div class="summary">
           <div class="metric"><span>대상 회사</span><strong>${esc(company.corp_name || "-")}</strong></div>
-          <div class="metric"><span>현재 감사인</span><strong>${esc(a.current_auditor || "-")}</strong></div>
+          <div class="metric"><span>최근 공시 감사인</span><strong>${esc(a.current_auditor || "-")}</strong></div>
           <div class="metric"><span>교체/검토 시기</span><strong>${esc(next.event_date || "-")}</strong></div>
-          <div class="metric"><span>남은 기간</span><strong>${esc(next.dday_label || "-")}</strong></div>
+          <div class="metric"><span>기준일 대비</span><strong>${esc(next.dday_label || "-")}</strong></div>
         </div>
         ${renderPrimaryDecision(data)}
         ${renderAuditTimeline(a)}
@@ -4300,7 +4203,7 @@ INDEX_HTML = r"""<!doctype html>
       const rows = data.service_contracts || [];
       if (!rows.length) return "";
       return `<h2 style="margin-top:16px;">감사용역 보수·시간</h2>
-        <table><thead><tr><th>사업연도</th><th>감사인</th><th>계약보수</th><th>계약시간</th><th>실제보수</th><th>실제시간</th><th>시간당 보수</th></tr></thead>
+        <table><thead><tr><th>사업연도</th><th>감사인</th><th>계약보수<br>(백만원)</th><th>계약시간<br>(시간)</th><th>실제보수<br>(백만원)</th><th>실제시간<br>(시간)</th><th>시간당 보수<br>(원/시간)</th></tr></thead>
         <tbody>${rows.slice(0, 8).map(row => `<tr>
           <td>${esc(row.bsns_year)}<small>${esc(row.period_label || "")}</small></td>
           <td>${esc(row.adtor || "-")}</td>
@@ -4383,5 +4286,37 @@ INDEX_HTML = r"""<!doctype html>
 """
 
 
+def run_core_regression_checks() -> None:
+    """Guard the legal-date calculations that drive the headline timeline."""
+    assert appointment_deadline(2025, 12) == date(2025, 2, 14)
+    assert appointment_deadline(2026, 12) == date(2026, 2, 19)
+    assert appointment_deadline(2026, 12, audit_committee_required=True) == date(2025, 12, 31)
+    assert periodic_subject_estimate({}, "N")["status"] == "excluded"
+
+    term_event = build_three_year_term_event(
+        {
+            "auditor": "테스트회계법인",
+            "start_year": 2023,
+            "end_year": 2025,
+            "length": 3,
+        },
+        12,
+        date(2026, 7, 23),
+        audit_committee_required=True,
+    )
+    assert term_event is not None
+    assert term_event["event_date"] == "2028-12-31"
+    assert "최신 완료 사업연도 공개이력은 2025년까지" in term_event["detail"]
+
+    schedule = [
+        {"event_date": "2026-07-22", "title": "과거"},
+        {"event_date": "2026-08-01", "title": "미래"},
+        {"event_date": "2026-07-23", "title": "기준일"},
+    ]
+    assert next_timeline_event(schedule, as_of=date(2026, 7, 23))["title"] == "기준일"
+    assert next_timeline_event(schedule[:1], as_of=date(2026, 7, 23)) == {}
+
+
 if __name__ == "__main__":
+    run_core_regression_checks()
     raise SystemExit(main())

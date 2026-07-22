@@ -45,12 +45,29 @@ This plugin is grounded in public audit disclosure and auditor appointment rules
 
 - FSC press release on periodic designation: https://www.fsc.go.kr/no010101/84372
   - Explains the periodic designation system as six years of free appointment followed by three years of regulator-designated external audit for listed companies and similar entities.
-- External Audit Act Article 10, auditor appointment: https://www.law.go.kr/LSW/lsLawLinkInfo.do?chrClsCd=010202&lsId=001701&lsJoLnkSeq=900643588&print=print
+- External Audit Act Article 10, auditor appointment: https://www.law.go.kr/LSW/lsLinkCommonInfo.do?chrClsCd=010202&lsJoLnkSeq=1027658295
   - Sets appointment deadlines and the rule that listed companies, large non-listed companies, and financial companies appoint the same auditor for three consecutive business years.
   - It also distinguishes appointment bodies such as audit committee, statutory auditor with auditor-selection committee approval, and related governance rules depending on company type.
 - FSS/FSC annual guidance summarized by KDI: https://eiec.kdi.re.kr/policy/materialView.do?num=273968
   - Summarizes auditor appointment deadlines, reporting duties, and company-type differences.
+- External Audit Act Article 11, regulator designation: https://www.law.go.kr/LSW/lsLawLinkInfo.do?chrClsCd=010202&lsJoLnkSeq=1001145102
+  - Distinguishes regulator designation from ordinary company appointment.
+- Current External Audit Act Enforcement Decree Article 15: https://www.law.go.kr/LSW/lsLinkCommonInfo.do?lspttninfSeq=149573
+  - Provides the six appointed-business-year/three designated-business-year framework, governance deferral conditions, and the KONEX exclusion in paragraph 5.
 - External Audit Act Enforcement Decree, external audit scope: https://www.law.go.kr/lumLsLinkPop.do?chrClsCd=010202&lspttninfSeq=149542
   - Defines external audit target thresholds for companies, including asset, revenue, liability, employee, and member thresholds.
 - External Audit Act Enforcement Decree, large non-listed company: https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=286317
   - Defines the large non-listed company asset threshold, including the separate threshold for business-report filers and public-disclosure-group companies.
+
+## Audit Market Benchmarks and Snapshot
+
+- FSS FY2024 accounting-firm business-report analysis: https://www.fss.or.kr/fss/bbs/B0000188/view.do?nttId=207569&menuNo=200218
+  - The separate official population is 36,756 audit engagements, of which Big4 had 4,844 (13.2%); it also reports 37.1% of listed-company audits and 50.6% of accounting-firm audit-segment revenue.
+- FSS 2024 external-audit target-company count: https://www.fss.or.kr/fss/bbs/B0000188/view.do?nttId=194195&menuNo=200218
+  - Reports 42,118 external-audit target companies at the end of 2024. This is not the same population as the dashboard's annual-report filers.
+- FSS 2025 external-audit target-company count: https://www.fss.or.kr/fss/bbs/B0000188/view.do?nttId=212401&menuNo=200218
+  - Reports the newer historical count of 42,891 companies at the end of 2025.
+- Dashboard snapshot validation date: 2026-07-23.
+  - Current annual-report-filer universe: 3,234 companies for 2023 and 3,323 for 2024.
+  - Rows with unresolved source-document reconciliation are excluded per metric when the numeric field is absent; negative and non-finite amounts are never included.
+  - The 2024 client revenue metric covers 2,876/3,323 companies and mixes the selected disclosed revenue/income account and consolidation scope, so it is labeled as a supplemental metric.

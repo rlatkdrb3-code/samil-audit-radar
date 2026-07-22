@@ -30,6 +30,7 @@ from typing import Any, Iterable
 
 
 API_BASE = "https://opendart.fss.or.kr/api"
+KST = dt.timezone(dt.timedelta(hours=9))
 BIG4_GROUPS = ("samil_pwc", "samjong_kpmg", "ey_hanyoung", "deloitte_anjin")
 BASE_FIELDS = [
     "year",
@@ -182,7 +183,7 @@ def quarter_ranges(start: dt.date, end: dt.date) -> Iterable[tuple[dt.date, dt.d
 
 
 def fetch_latest_filings(client: DartClient, fiscal_year: int) -> dict[str, dict[str, str]]:
-    today = dt.date.today()
+    today = dt.datetime.now(KST).date()
     start = dt.date(fiscal_year, 1, 1)
     pattern = re.compile(FISCAL_YEAR_RE_TEMPLATE.format(year=fiscal_year))
     latest: dict[str, dict[str, str]] = {}
@@ -239,6 +240,21 @@ def merge_universe(
     rows: list[dict[str, str]],
     filings_by_year: dict[int, dict[str, dict[str, str]]],
 ) -> tuple[list[dict[str, str]], set[tuple[str, str]]]:
+    # A refreshed year must match the latest-filing universe exactly. Keeping
+    # rows that disappeared from the current list silently inflates the company
+    # denominator (the previous implementation retained stale input rows).
+    refreshed_years = {str(year) for year in filings_by_year}
+    refreshed_keys = {
+        (str(year), corp_code)
+        for year, filings in filings_by_year.items()
+        for corp_code in filings
+    }
+    rows = [
+        row
+        for row in rows
+        if row.get("year", "") not in refreshed_years
+        or (row.get("year", ""), row.get("corp_code", "")) in refreshed_keys
+    ]
     by_key = {(row.get("year", ""), row.get("corp_code", "")): row for row in rows}
     changed: set[tuple[str, str]] = set()
     for year, filings in filings_by_year.items():

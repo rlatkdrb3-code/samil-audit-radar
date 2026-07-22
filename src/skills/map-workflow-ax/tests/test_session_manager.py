@@ -96,6 +96,17 @@ class SessionManagerTests(unittest.TestCase):
             session_manager.command_complete(args(workspace=self.workspace))
         self.assertIn("not confirmed", str(context.exception))
 
+    def test_step_rejects_non_finite_metrics(self) -> None:
+        for field_name, value in (
+            ("frequency_per_month", float("nan")),
+            ("minutes_per_case", float("inf")),
+            ("manual_ratio_pct", float("nan")),
+        ):
+            with self.subTest(field_name=field_name):
+                with self.assertRaises(session_manager.SessionError) as context:
+                    session_manager.step_updates(args(**{field_name: value}))
+                self.assertIn("must be finite", str(context.exception))
+
     def test_revision_guard_rejects_stale_update(self) -> None:
         process = self.set_scope()
         with self.assertRaises(session_manager.SessionError) as context:
