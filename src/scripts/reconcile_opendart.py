@@ -367,6 +367,11 @@ def reporting_period_key(value: str) -> str:
     return ""
 
 
+def is_prior_relative_period(value: str) -> bool:
+    compact = re.sub(r"\s+", "", value or "")
+    return "당기" not in compact and "전기" in compact
+
+
 def structured_period_rank(
     value: str,
     report_year: str | int | None = None,
@@ -385,7 +390,7 @@ def structured_period_rank(
 
     # `제N기(전기/전전기)` alone identifies only a prior relative period.  Its
     # term number must not be promoted to the requested business year.
-    if "전기" in compact:
+    if is_prior_relative_period(compact):
         return None
     return reporting_period_rank(compact)
 
@@ -443,6 +448,8 @@ def parse_audit_service_table(raw: str) -> dict[str, Any] | None:
             if len(re.findall(r"(?:회계법인|감사반)", auditor)) != 1:
                 continue
             period_label = cells[period_index].strip()
+            if is_prior_relative_period(period_label):
+                continue
             score = reporting_period_rank(period_label)
             if score is None:
                 continue
@@ -510,6 +517,8 @@ def parse_auditor_evidence_from_opinion_table(raw: str) -> dict[str, str] | None
             if len(re.findall(r"(?:회계법인|감사반)", auditor)) != 1:
                 continue
             period_label = cells[period_index].strip()
+            if is_prior_relative_period(period_label):
+                continue
             score = reporting_period_rank(period_label)
             if score is None:
                 continue
@@ -809,6 +818,22 @@ def save_csv(path: Path, rows: list[dict[str, str]], original_fields: list[str])
     temp.replace(path)
 
 
+def clear_audit_fields(row: dict[str, str]) -> None:
+    for field in (
+        "auditor_raw",
+        "audit_contract_fee",
+        "audit_actual_fee",
+        "audit_contract_hours",
+        "audit_actual_hours",
+        "auditor_source",
+        "fee_source",
+    ):
+        row[field] = ""
+    row["auditor_group"] = "other_or_unknown"
+    row["warnings"] = ""
+    row["validation_status"] = "pending"
+
+
 def metric_summary(rows: list[dict[str, str]], field: str) -> tuple[int, float]:
     totals: Counter[str] = Counter()
     coverage = 0
@@ -846,6 +871,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--skip-universe-refresh", action="store_true")
     parser.add_argument("--skip-revenue", action="store_true")
+    parser.add_argument(
+        "--force-audit-refresh",
+        action="store_true",
+        help="Discard bundled auditor/fee values for selected years and fetch them again.",
+    )
     return parser.parse_args()
 
 
@@ -867,6 +897,10 @@ def main() -> int:
         rows, changed_receipts = merge_universe(rows, filings_by_year)
 
     selected_rows = [row for row in rows if int(row.get("year") or 0) in args.years]
+    if args.force_audit_refresh:
+        for row in selected_rows:
+            clear_audit_fields(row)
+
     for row in selected_rows:
         row["auditor_group"] = normalize_auditor(row.get("auditor_raw", ""))
         row["auditor_source"] = row.get("auditor_source") or (
@@ -879,13 +913,18 @@ def main() -> int:
             "fnlttSinglAcntAll" if row.get("revenue") else ""
         )
 
-    audit_api_targets = [
-        row
-        for row in selected_rows
-        if not row.get("auditor_raw", "").strip()
-        or parse_number(row.get("audit_contract_fee")) is None
-        or (row.get("year", ""), row.get("corp_code", "")) in changed_receipts
-    ]
+    audit_api_targets = (
+        selected_rows
+        if args.force_audit_refresh
+        else [
+            row
+            for row in selected_rows
+            if not row.get("auditor_raw", "").strip()
+            or parse_number(row.get("audit_contract_fee")) is None
+            or (row.get("year", ""), row.get("corp_code", ""))
+            in changed_receipts
+        ]
+    )
     print(f"structured audit-service targets: {len(audit_api_targets):,}")
     audit_api_results = run_parallel(
         lambda row: fetch_audit_service_api(client, row),

@@ -1344,7 +1344,11 @@ def current_auditor_document_evidence(
             period_label = cells[period_index].strip()
             auditor = re.sub(r"\s+", " ", cells[auditor_index]).strip()
             rank = document_period_rank(period_label)
-            if rank is None or not valid_document_auditor_cell(auditor):
+            if (
+                rank is None
+                or is_prior_period_label(period_label)
+                or not valid_document_auditor_cell(auditor)
+            ):
                 continue
             candidates.append((rank, period_label, auditor))
         if not candidates:
@@ -1823,7 +1827,11 @@ def is_current_period_row(row: dict[str, Any]) -> bool:
 
 
 def is_prior_period_row(row: dict[str, Any]) -> bool:
-    label = re.sub(r"\s+", "", str(row.get("bsns_year", "")))
+    return is_prior_period_label(row.get("bsns_year", ""))
+
+
+def is_prior_period_label(value: Any) -> bool:
+    label = re.sub(r"\s+", "", str(value or ""))
     return "당기" not in label and "전기" in label
 
 

@@ -227,6 +227,17 @@ class AuditRadarAccuracyTests(unittest.TestCase):
             )
         )
 
+        matching_prior_period_document = matching_document.replace(
+            "제58기 (당기)",
+            "제57기 (전기)",
+        )
+        self.assertIsNone(
+            radar.annual_report_document_history_row(
+                filing,
+                matching_prior_period_document,
+            )
+        )
+
     def test_structured_api_wins_over_document_fallback_for_same_year(self):
         merged = radar.merge_audit_sources(
             [

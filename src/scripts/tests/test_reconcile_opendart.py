@@ -45,6 +45,39 @@ class ReconcileUniverseTests(unittest.TestCase):
         self.assertEqual(coverage, 1)
         self.assertEqual(big4_share, 100.0)
 
+    def test_forced_audit_refresh_preserves_revenue_only(self):
+        row = {
+            "auditor_raw": "과거회계법인",
+            "auditor_group": "other_or_unknown",
+            "audit_contract_fee": "100000000",
+            "audit_actual_fee": "110000000",
+            "audit_contract_hours": "1000",
+            "audit_actual_hours": "1100",
+            "auditor_source": "document.xml",
+            "fee_source": "document.xml",
+            "warnings": "document_fields_unresolved",
+            "validation_status": "unresolved",
+            "revenue": "999000000",
+            "revenue_source": "fnlttSinglAcntAll",
+        }
+
+        reconcile.clear_audit_fields(row)
+
+        for field in (
+            "auditor_raw",
+            "audit_contract_fee",
+            "audit_actual_fee",
+            "audit_contract_hours",
+            "audit_actual_hours",
+            "auditor_source",
+            "fee_source",
+        ):
+            self.assertEqual(row[field], "")
+        self.assertEqual(row["revenue"], "999000000")
+        self.assertEqual(row["revenue_source"], "fnlttSinglAcntAll")
+        self.assertEqual(row["warnings"], "")
+        self.assertEqual(row["validation_status"], "pending")
+
     def test_primary_tables_choose_unique_maximum_term(self):
         document = """
         <TABLE><THEAD><TR><TH>사업연도</TH><TH>감사인</TH><TH>감사계약내역</TH><TH>보수</TH><TH>시간</TH><TH>실제수행내역</TH></TR></THEAD><TBODY>
@@ -196,6 +229,19 @@ class ReconcileUniverseTests(unittest.TestCase):
         self.assertEqual(error, "")
         self.assertEqual(parsed["period_key"], "term:58")
         self.assertEqual(parsed["auditor"], "현재회계법인")
+
+    def test_document_matching_prior_period_tables_are_not_current_evidence(self):
+        document = """
+        <TABLE><THEAD><TR><TH>사업연도</TH><TH>감사인</TH><TH>감사계약내역</TH><TH>보수</TH><TH>시간</TH><TH>실제수행내역</TH></TR></THEAD><TBODY>
+        <TR><TD>제57기(전기)</TD><TD>과거회계법인</TD><TD>감사</TD><TD>100백만원</TD><TD>1,000</TD><TD>100백만원</TD><TD>1,000</TD></TR>
+        </TBODY></TABLE>
+        <TABLE><THEAD><TR><TH>사업연도</TH><TH>감사인</TH><TH>감사의견</TH></TR></THEAD><TBODY>
+        <TR><TD>제57기(전기)</TD><TD>과거회계법인</TD><TD>적정</TD></TR>
+        </TBODY></TABLE>
+        """
+
+        self.assertIsNone(reconcile.parse_audit_service_table(document))
+        self.assertEqual(reconcile.parse_auditor_from_opinion_table(document), "")
 
     def test_document_service_table_alone_does_not_confirm_auditor(self):
         document = """
