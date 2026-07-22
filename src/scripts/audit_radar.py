@@ -4079,7 +4079,7 @@ def start_market_refresh() -> dict[str, Any]:
             "--years",
             "2025",
             "--workers",
-            "3",
+            "6",
         ]
         try:
             result = subprocess.run(
