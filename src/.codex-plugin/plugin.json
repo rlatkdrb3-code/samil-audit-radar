@@ -1,6 +1,6 @@
 {
   "name": "audit-appointment-radar",
-  "version": "0.3.0+codex.20260722203330",
+  "version": "0.3.0+codex.20260722232013",
   "description": "Monitor auditor appointments, analyze audit-market share, and turn guided workflow interviews into evidence-linked AX opportunities.",
   "author": {
     "name": "AX Hackathon Participant"

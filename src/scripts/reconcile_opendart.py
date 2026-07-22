@@ -1123,6 +1123,20 @@ def initialize_provenance(rows: list[dict[str, str]]) -> None:
 
 def finalize_validation(rows: list[dict[str, str]]) -> None:
     for row in rows:
+        for field in (
+            "audit_contract_fee",
+            "audit_actual_fee",
+            "audit_contract_hours",
+            "audit_actual_hours",
+            "revenue",
+        ):
+            raw_value = str(row.get(field) or "").strip()
+            if not raw_value:
+                continue
+            number = parse_number(raw_value)
+            if number is None or number < 0:
+                row[field] = ""
+                append_warning(row, f"invalid_{field}_excluded")
         row["auditor_group"] = normalize_auditor(row.get("auditor_raw", ""))
         auditor_ok = bool(row.get("auditor_raw", "").strip())
         contract_fee = parse_number(row.get("audit_contract_fee"))
@@ -1268,12 +1282,18 @@ def main() -> int:
         if args.repair_anomalies
         else []
     )
-    if args.force_audit_refresh:
-        for row in selected_rows:
+    for row in selected_rows:
+        if (row.get("year", ""), row.get("corp_code", "")) in changed_receipts:
             clear_audit_fields(row)
-    elif repair_rows:
+
+    # A forced refresh must be lossless when OpenDART temporarily omits a
+    # structured row.  Fresh non-empty fields replace the snapshot below;
+    # the last verified value remains as a fallback.  Targeted anomaly
+    # repair still clears the suspect audit fields before reconciliation.
+    if not args.force_audit_refresh and repair_rows:
         for row in repair_rows:
-            clear_audit_fields(row)
+            if (row.get("year", ""), row.get("corp_code", "")) not in changed_receipts:
+                clear_audit_fields(row)
 
     initialize_provenance(rows)
 
@@ -1367,6 +1387,12 @@ def main() -> int:
                 row["fee_source"] = "foreign_currency_excluded"
                 if currency_unverified and "foreign_currency_fee" not in result_warnings:
                     result_warnings.append("fee_currency_unverified")
+            elif "inconsistent_million_unit" in result_warnings:
+                # Some source tables concatenate component values and a
+                # subtotal under a million-won header.  The parser can flag
+                # that ambiguity, but it must not overwrite the structured
+                # value with a 1,000x or concatenated document artifact.
+                result_warnings.append("document_metric_replacement_skipped")
             else:
                 replacements = (
                     ("audit_contract_fee", "contract_fee"),

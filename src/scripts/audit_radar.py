@@ -6,11 +6,9 @@ from __future__ import annotations
 import argparse
 import calendar
 import csv
-import hmac
 import json
 import os
 import re
-import subprocess
 import sys
 import threading
 import time
@@ -53,7 +51,6 @@ ROOT = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = ROOT.parent
 MARKET_SHARE_HTML = ROOT / "web" / "market_share.html"
 MARKET_SHARE_CSV = ROOT / "examples" / "audit_market_annual_report_snapshot.csv"
-MARKET_REFRESH_OUTPUT = Path("/tmp/audit_market_2023_2025_annual_report_all.csv")
 PROCESS_TO_AX_HTML = ROOT / "web" / "process_to_ax.html"
 CACHE_DIR = PROJECT_ROOT / ".cache"
 CORP_CACHE = CACHE_DIR / "corp_codes.json"
@@ -66,14 +63,6 @@ FIRM_CONTEXT_CANDIDATES = (
 REQUEST_LOGS: dict[str, list[float]] = {}
 RESPONSE_CACHE: dict[str, tuple[float, Any]] = {}
 SERVER_LOCK = threading.Lock()
-MARKET_REFRESH_LOCK = threading.Lock()
-MARKET_REFRESH_STATE: dict[str, Any] = {
-    "status": "idle",
-    "started_at": "",
-    "finished_at": "",
-    "returncode": None,
-    "log": "",
-}
 CORP_CACHE_LOCK = threading.Lock()
 KST = timezone(timedelta(hours=9))
 CORP_CLASS_LABELS = {
@@ -4081,91 +4070,6 @@ def digits_int(value: Any) -> int:
     return int(digits) if digits else 0
 
 
-def market_refresh_authorized(handler: BaseHTTPRequestHandler) -> bool:
-    expected = os.environ.get("MARKET_REFRESH_TOKEN", "").strip()
-    supplied = str(handler.headers.get("X-Market-Refresh-Token") or "").strip()
-    return bool(expected and supplied and hmac.compare_digest(expected, supplied))
-
-
-def start_market_refresh() -> dict[str, Any]:
-    with MARKET_REFRESH_LOCK:
-        if MARKET_REFRESH_STATE.get("status") == "running":
-            return dict(MARKET_REFRESH_STATE)
-        MARKET_REFRESH_STATE.update(
-            {
-                "status": "running",
-                "started_at": datetime.now(timezone.utc).isoformat(),
-                "finished_at": "",
-                "returncode": None,
-                "log": "",
-            }
-        )
-        MARKET_REFRESH_OUTPUT.unlink(missing_ok=True)
-
-    def worker() -> None:
-        command = [
-            sys.executable,
-            str(ROOT / "scripts" / "reconcile_opendart.py"),
-            "--input",
-            str(MARKET_SHARE_CSV),
-            "--output",
-            str(MARKET_REFRESH_OUTPUT),
-            "--years",
-            "2025",
-            "--workers",
-            "6",
-            "--force-audit-refresh",
-            "--strict-overrides",
-            "--skip-revenue",
-        ]
-        try:
-            result = subprocess.run(
-                command,
-                cwd=PROJECT_ROOT,
-                capture_output=True,
-                text=True,
-                timeout=60 * 55,
-                check=False,
-            )
-            combined_log = (result.stdout + "\n" + result.stderr).strip()[-12000:]
-            status = (
-                "complete"
-                if result.returncode == 0 and MARKET_REFRESH_OUTPUT.is_file()
-                else "failed"
-            )
-            with MARKET_REFRESH_LOCK:
-                MARKET_REFRESH_STATE.update(
-                    {
-                        "status": status,
-                        "finished_at": datetime.now(timezone.utc).isoformat(),
-                        "returncode": result.returncode,
-                        "log": combined_log,
-                    }
-                )
-        except Exception as exc:  # noqa: BLE001
-            with MARKET_REFRESH_LOCK:
-                MARKET_REFRESH_STATE.update(
-                    {
-                        "status": "failed",
-                        "finished_at": datetime.now(timezone.utc).isoformat(),
-                        "returncode": -1,
-                        "log": f"{type(exc).__name__}: {exc}",
-                    }
-                )
-
-    threading.Thread(target=worker, daemon=True, name="market-refresh-2025").start()
-    return dict(MARKET_REFRESH_STATE)
-
-
-def market_refresh_status() -> dict[str, Any]:
-    with MARKET_REFRESH_LOCK:
-        state = dict(MARKET_REFRESH_STATE)
-    state["output_ready"] = MARKET_REFRESH_OUTPUT.is_file()
-    if MARKET_REFRESH_OUTPUT.is_file():
-        state["output_bytes"] = MARKET_REFRESH_OUTPUT.stat().st_size
-    return state
-
-
 def run_server(host: str, port: int, config: AppConfig) -> None:
     handler = make_handler(config)
     server = ThreadingHTTPServer((host, port), handler)
@@ -4196,24 +4100,6 @@ def make_handler(config: AppConfig) -> type[BaseHTTPRequestHandler]:
                     return
                 if parsed.path == "/data/audit-market-share.csv":
                     self.respond_file(MARKET_SHARE_CSV, "text/csv; charset=utf-8")
-                    return
-                if parsed.path.startswith("/api/internal/market-refresh"):
-                    if not market_refresh_authorized(self):
-                        self.respond_json({"error": "not found"}, status=404)
-                        return
-                    if parsed.path == "/api/internal/market-refresh/start":
-                        self.respond_json(start_market_refresh(), status=202)
-                        return
-                    if parsed.path == "/api/internal/market-refresh/status":
-                        self.respond_json(market_refresh_status())
-                        return
-                    if parsed.path == "/api/internal/market-refresh/download":
-                        self.respond_file(
-                            MARKET_REFRESH_OUTPUT,
-                            "text/csv; charset=utf-8",
-                        )
-                        return
-                    self.respond_json({"error": "not found"}, status=404)
                     return
                 if parsed.path.startswith("/api/") and not allow_request(client_ip(self)):
                     self.respond_json(

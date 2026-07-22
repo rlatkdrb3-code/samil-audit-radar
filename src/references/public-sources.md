@@ -30,7 +30,7 @@ This plugin is grounded in public audit disclosure and auditor appointment rules
 - OpenDART original disclosure file API: https://opendart.fss.or.kr/guide/detail.do?apiGrpCd=DS001&apiId=2019003
   - Downloads the exact receipt's original filing as a ZIP of XML files. The radar uses it only for recent structured-data gaps and requires agreement between primary audit-opinion and audit-service tables.
 - OpenDART periodic-report data downloads: https://opendart.fss.or.kr/disclosureinfo/fnltt/dwld/list.do
-  - Lists the 2025 business-report financial dataset generated on 2026-07-16. The dashboard independently reconciles the latest annual-report receipt for each company through the same cutoff.
+  - Lists the 2025 business-report financial dataset generated on 2026-07-16. Separately, the dashboard's annual-report filing universe and audit fields were rechecked against the current submission list on 2026-07-23; the two dates refer to different OpenDART refresh surfaces.
 - DART company-by-company search: https://dart.fss.or.kr/dsab001/main.do
   - Public DART search exposes `외부감사관련` categories such as `감사보고서`, `연결감사보고서`, `결합감사보고서`, and `감사전재무제표미제출신고서`.
 - External Audit Act Enforcement Decree, audit report submission and public inspection: https://www.law.go.kr/LSW/lumLsLinkPop.do?lspttninfSeq=149589
@@ -73,6 +73,7 @@ This plugin is grounded in public audit disclosure and auditor appointment rules
   - Reports the newer historical count of 42,891 companies at the end of 2025.
 - Dashboard snapshot validation date: 2026-07-23.
   - Current annual-report-filer universe: 3,234 companies for 2023, 3,323 for 2024, and 3,343 for 2025.
-  - `audit_market_verified_overrides.csv` retains the DART corporation code, evidence receipt, review status, and reason for every source-reviewed correction, partial confirmation, foreign-currency exclusion, or unresolved disclosure conflict.
+  - `audit_market_verified_overrides.csv` retains 165 source-reviewed decisions: 107 exact confirmations, 6 partial confirmations, 17 foreign-currency exclusions, and 35 unresolved disclosure-unit conflicts. Every row includes the DART corporation code, evidence receipt, review status, and reason.
   - Rows with unresolved source-document reconciliation are excluded per metric when the numeric field is absent; negative and non-finite amounts are never included.
-  - Client revenue/income coverage is incomplete and mixes the selected disclosed account and consolidation scope, so it is labeled as a supplemental metric rather than whole-market revenue.
+  - FY2025 audit-contract-fee coverage is 3,262/3,343 (97.58%), actual-fee coverage is 3,245/3,343 (97.07%), and client revenue/income coverage is 2,941/3,343 (87.97%).
+  - Client revenue/income is unavailable for FY2023. FY2024–FY2025 values mix the selected disclosed account and consolidation scope, so they are labeled as a supplemental metric rather than whole-market revenue.

@@ -157,12 +157,21 @@ class ReconcileUniverseTests(unittest.TestCase):
             {
                 "auditor_raw": "테스트회계법인",
                 "audit_contract_fee": "-1",
+                "audit_actual_hours": "-2,058",
+                "revenue": "nan",
                 "fee_source": "adtServcCnclsSttus",
+                "warnings": "",
             }
         ]
 
         reconcile.finalize_validation(rows)
 
+        self.assertEqual(rows[0]["audit_contract_fee"], "")
+        self.assertEqual(rows[0]["audit_actual_hours"], "")
+        self.assertEqual(rows[0]["revenue"], "")
+        self.assertIn("invalid_audit_contract_fee_excluded", rows[0]["warnings"])
+        self.assertIn("invalid_audit_actual_hours_excluded", rows[0]["warnings"])
+        self.assertIn("invalid_revenue_excluded", rows[0]["warnings"])
         self.assertEqual(rows[0]["validation_status"], "unresolved")
 
     def test_primary_tables_choose_unique_maximum_term(self):
